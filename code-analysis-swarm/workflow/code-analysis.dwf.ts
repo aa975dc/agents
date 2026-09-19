@@ -61,6 +61,7 @@ interface Specialty {
   module_refs: string[]; build_files_covered: string[]; not_covered: string[];
 }
 interface Verdict { claim_id: string; verdict: "confirmed" | "refuted" | "unverified"; note: string; own_evidence: string }
+interface VerdictBundle { verdicts: Verdict[] }
 interface ReportFile { path: string; summary: string; sections: number[]; claim_ids: string[] }
 interface WorkflowReport {
   status: "complete" | "partial" | "blocked";
@@ -139,20 +140,24 @@ function claimsValid(claims: Claim[]) {
 //   硬阻断（路径逃逸/权限/未知副作用等普通 Error，或与上一次完全相同的失败复发）→ 立即抛出 blocked。
 // askBudget/lastFailure 按代理名全局记账：同一实例的修复尝试不因换闸门而重置额度。
 const MAX_REPAIRS = 2;
-const actorCache = new Map<string, ReturnType<typeof agent>>();
+// 宿主禁止对 agent 取引用（含 typeof），也禁止重定型为本地结构接口（逃逸站点标识）；
+// 缓存必须以 facade 自己的 Agent 接口类型持有，ask 调用点才可被日志/重放定位。
+const actorCache = new Map<string, Agent>();
 const askBudget = new Map<string, number>();
 const lastFailure = new Map<string, string>();
 function actorFor(name: string) {
   if (!actorCache.has(name)) actorCache.set(name, agent(name));
   return actorCache.get(name)!;
 }
-async function askGate<T>(name: string, prompt: (feedback: string) => string, validate: (value: T) => void): Promise<T> {
+// ask 的类型参数必须是本脚本内声明的具体可序列化接口——泛型 T 无法证明可序列化，
+// 因此 askGate 只承接回流循环，真正的 ask 调用（带具体类型）由调用点以回调传入。
+async function askGate<T>(name: string, doAsk: (feedback: string) => Node<T>, validate: (value: T) => void): Promise<T> {
   let feedback = "";
   for (;;) {
     const used = askBudget.get(name) ?? 0;
     requireThat(used < 1 + MAX_REPAIRS, `${name} 修复尝试次数已用尽（初次+${MAX_REPAIRS} 次后仍不闭合）`);
     askBudget.set(name, used + 1);
-    const value = await actorFor(name).ask<T>(prompt(feedback));
+    const value = await doAsk(feedback);
     try {
       validate(value);
       return value;
@@ -301,14 +306,14 @@ try {
       if (e.from_contract === undefined) e.from_contract = false;
     }
   }
-  let moduleResults = await Promise.all(map.chunks.map(c => askGate<ModuleResult>(a2Name(c.id), feedback => [
+  let moduleResults = await Promise.all(map.chunks.map(c => askGate<ModuleResult>(a2Name(c.id), feedback => actorFor(a2Name(c.id)).ask<ModuleResult>([
     `先读 ${ROLE}/a2-module-analyst.md；按 DESIGN.md 6.2 返回完整 snake_case JSON。`,
     `目标与块文件闭集：${JSON.stringify({ target, chunk: c })}；摘要：${map.tree_summary}。`,
     `本块结果写 ${board}/chunks/${c.id}.json；契约只写 ${board}/interfaces/${c.id}/。`,
     "并行阶段没有已冻结的邻块契约，不依赖其他块完成顺序；跨块不明之处记录 gaps 并退回，不猜测。",
     "coverage 必含 analyzed_files 精确路径列表和 gaps；抽样/部分读取不能计作完整深读。findings.id 以块 ID 开头；edges 必含 source，from_contract 可选布尔（缺省 false）。",
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 JSON：\n- ${feedback.split("\n").join("\n- ")}` : "",
-  ].filter(Boolean).join("\n"), r => validateChunkResult(r, c))));
+  ].filter(Boolean).join("\n")), r => validateChunkResult(r, c))));
   // G2 汇总：模块名跨块唯一、依赖边端点可归位（可修复回流，Z03）。
   function aggregateG2Issues(results: ModuleResult[], chunks: Chunk[]): { messages: string[]; affected: Set<string> } {
     const names = results.flatMap(r => r.modules.map(m => m.name));
@@ -337,12 +342,12 @@ try {
     const prev = moduleResults;
     moduleResults = await Promise.all(map.chunks.map(async (c, i) => {
       if (!issues.affected.has(c.id)) return prev[i];
-      return await askGate<ModuleResult>(a2Name(c.id), () => [
+      return await askGate<ModuleResult>(a2Name(c.id), () => actorFor(a2Name(c.id)).ask<ModuleResult>([
         "G2 汇总检查发现你此前返回的块结果存在以下问题，请修复后重新返回完整 JSON：",
         `- ${issues.messages.join("\n- ")}`,
         `当前模块全集（模块命名不得与之冲突；依赖边端点必须属于该全集或本块模块）：${JSON.stringify(moduleNamesNow)}`,
         `目标与块文件闭集不变：${JSON.stringify({ target, chunk: c })}；本块结果写 ${board}/chunks/${c.id}.json；coverage 与 findings 规则同前。`,
-      ].join("\n"), r => validateChunkResult(r, c));
+      ].join("\n")), r => validateChunkResult(r, c));
     }));
   }
   const modules = moduleResults.flatMap(r => r.modules);
@@ -371,13 +376,13 @@ try {
     if (kind === "architecture") soft(s.claims.length > 0, "架构判定没有送验结论");
     if (kind === "build") sameSet(s.build_files_covered.map(pathKey), map.build_files.map(f => pathKey(f.path)), "构建入口覆盖");
   }
-  const specialties = await Promise.all(specialtySpecs.map(([role, name, kind]) => askGate<Specialty>(name, feedback => [
+  const specialties = await Promise.all(specialtySpecs.map(([role, name, kind]) => askGate<Specialty>(name, feedback => actorFor(name).ask<Specialty>([
     `先读 ${ROLE}/${role}。黑板 ${board}；目标 ${JSON.stringify(target)}；模块全集 ${JSON.stringify(moduleNames)}；构建清单 ${JSON.stringify(map.build_files)}。`,
     `按角色契约写 ${board}/specialty/${kind}.md 及所属图表；返回 DESIGN.md 6.9 的共同摘要（snake_case）。`,
     "A3 不读原始代码；A4/A5 只定点读清单/锁文件/配置；禁止执行安装、构建和项目脚本。",
     "summary/details/findings/claims/module_refs/build_files_covered/not_covered 字段必须齐全；claims 有唯一 ID、source_role 和非空 evidence_refs。未覆盖内容如实声明。",
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 JSON：\n- ${feedback.split("\n").join("\n- ")}` : "",
-  ].filter(Boolean).join("\n"), s => validateSpecialty(s, kind))));
+  ].filter(Boolean).join("\n")), s => validateSpecialty(s, kind))));
   stage = "G3 制品落盘核验";
   await ensureArtifacts(board, helperPath, [
     { path: `${board}/specialty/architecture.md`, owner: specialtySpecs[0][1] },
@@ -408,12 +413,12 @@ try {
       soft(v.verdict === "unverified" || nonempty(v.own_evidence), "独立 verdict 缺少自己的证据");
     }
   }
-  const { verdicts } = await askGate<{ verdicts: Verdict[] }>("交叉验证员·铁证如", feedback => [
+  const { verdicts } = await askGate<VerdictBundle>("交叉验证员·铁证如", feedback => actorFor("交叉验证员·铁证如").ask<VerdictBundle>([
     `先读 ${ROLE}/a6-verifier.md。目标 ${JSON.stringify(target)}；逐条复查全部结论 ${JSON.stringify(toVerify)}。`,
     `写 ${board}/verification/verdicts.json，返回 {verdicts:[{claim_id,verdict,note,own_evidence}]}。`,
     "独立读取与复查，不接收原完整论证。confirmed/refuted 均须自己的非空证据；无法复查用 unverified 并说明原因，不能当作 refuted。严禁限取前 N 条。",
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 verdicts：\n- ${feedback.split("\n").join("\n- ")}` : "",
-  ].filter(Boolean).join("\n"), v => validateVerdicts(v.verdicts));
+  ].filter(Boolean).join("\n")), v => validateVerdicts(v.verdicts));
   const confirmed = verdicts.filter(v => v.verdict === "confirmed").length;
   const refuted = verdicts.filter(v => v.verdict === "refuted").length;
   const unverified = verdicts.filter(v => v.verdict === "unverified").length;
@@ -450,13 +455,13 @@ try {
   const reportPath = `${board}/report/analysis-report.md`;
   const verifyRun = await world.run("python3", [helperPath, "verify", "--json", JSON.stringify({ source_root: target, run_root: board, outputs: [reportPath] })]);
   requireThat(verifyRun.exitCode === 0, `发布前目录关系复核失败（exit ${verifyRun.exitCode}）：${diag(verifyRun)}`);
-  const reportFile = await askGate<ReportFile>("报告撰写员·文汇章", feedback => [
+  const reportFile = await askGate<ReportFile>("报告撰写员·文汇章", feedback => actorFor("报告撰写员·文汇章").ask<ReportFile>([
     `先读 ${ROLE}/a7-reporter.md，只组织已有结论。黑板 ${board}；仓库 ${repoName}；中文报告写 ${reportPath}。`,
     `只允许引用以下经确定性核验真实存在的黑板制品（清单之外的文件不得作为报告素材）：${JSON.stringify(verifiedArtifacts)}。`,
     `覆盖 ${JSON.stringify(coverage)}；verdicts ${JSON.stringify(verdicts)}；未覆盖 ${JSON.stringify(notCovered)}。`,
     `报告必须保留 refuted 与 unverified，不写成全部已验证。返回 path、summary、sections（0~8）和 claim_ids（本次送验全部 ID）：${JSON.stringify(toVerify.map(c => c.id))}。`,
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回：\n- ${feedback.split("\n").join("\n- ")}` : "",
-  ].filter(Boolean).join("\n"), rf => {
+  ].filter(Boolean).join("\n")), rf => {
     soft(nonempty(rf?.summary), "报告摘要为空");
     requireThat(pathKey(rf.path) === pathKey(reportPath), "报告路径越界");
     list(rf.sections, "报告章节"); strings(rf.claim_ids, "报告结论 ID");

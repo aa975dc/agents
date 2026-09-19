@@ -54,4 +54,14 @@
 | H03 角色加载 | 已证 | 会话内调度记录 |
 | H03 DWF 内 agent 调用 | NOT_RUN | 待 H06 |
 
+## 补充：真实编译 dwf.ts 时新发现的 facade 硬约束（2026-09-20，H06 准备过程中）
+
+以真实宿主 CreateWorkflow 编译修复后的 code-analysis.dwf.ts，连续抓出三条 mock 单测（stripTypeScriptTypes + new Function）不可能发现、且 tsc 严格模式也不报的约束，逐条以编译诊断修复：
+
+1. **agent 禁止取引用（含类型位置）**：`ReturnType<typeof agent>` → 编译拒绝："facade function 'agent' may only be called directly; taking a reference to it defeats site identity (journal and replay key off call sites)"。修复：缓存表直接以 facade 的 `Agent` 接口类型持有调用返回值。
+2. **facade 值禁止重定型为本地结构接口**：自定义 `interface Actor { ask… }` 承接 agent 返回值 → 编译拒绝："retyping a facade value to a structurally-compatible non-facade type escapes site identity"。修复：改用 facade 声明的 `Agent` 类型。
+3. **ask<T> 的 T 必须是具体可序列化接口**：泛型函数 `askGate<T>` 内部 `ask<T>` → 提交拒绝："unsupported ask result type: type is not JSON-serializable"。修复：ask 调用移至各调用点并绑定具体接口（ModuleResult/Specialty/VerdictBundle/ReportFile），askGate 只承接回流循环；内联对象类型 `{verdicts:…}` 一并改为命名接口 VerdictBundle。
+
+结论：仅靠 Node mock 与 tsc 无法证明 DWF 兼容性（Z19 的核心论断再获实证）；修复后的 dwf.ts 于 dwfrun-2bea6e0b 首次通过真实编译并执行。
+
 对修复的约束推论：phase 字面量、world.run 字面量命令 + args 传值、报告发布优先 artifact.markdown、run 目录用 mkdir 排他、不得依赖 workspace 外发布。
