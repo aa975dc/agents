@@ -11,6 +11,27 @@ import tempfile
 from core import CompanionError, Project, read_json, render_html, render_markdown
 
 
+def _kernel_path():
+    """定位仓库根 packages/agents_kernel 并加入 sys.path（用 __file__ 相对定位）。
+
+    兼容从仓库（<repo>/dev-companion/scripts）与从插件目录（scripts 与 packages 同根）
+    两种布局。脱离仓库根的独立安装产物由 P2-05 的 vendor 构建提供
+    （02_TARGET_ARCHITECTURE.md §3），此处不引入第二套机制。
+    """
+    for base in Path(__file__).resolve().parents:
+        if (base / "packages" / "agents_kernel").is_dir():
+            packages = str(base / "packages")
+            if packages not in sys.path:
+                sys.path.insert(0, packages)
+            return
+    raise ImportError("找不到 agents_kernel：需要仓库根 packages/agents_kernel（插件独立分发由 vendor 构建提供）")
+
+
+_kernel_path()
+
+from agents_kernel.paths import absolute, inside, realpath
+
+
 def parser():
     root = argparse.ArgumentParser(description="开发陪伴：产品规划、实现联调、可信验收与发布")
     root.add_argument("--project", default=".", help="项目目录")
@@ -123,10 +144,10 @@ def run(args):
         output = (json.dumps(view, ensure_ascii=False, indent=2) if args.format == "json" else
                   render_html(view) if args.format == "html" else render_markdown(view))
         if args.out:
-            path = Path(args.out).absolute()
-            resolved = path.resolve()
-            internal = project.data.resolve()
-            if path.is_symlink() or ((resolved == internal or internal in resolved.parents) and resolved != internal / "board.html"):
+            path = absolute(args.out)
+            resolved = realpath(path)
+            internal = realpath(project.data)
+            if path.is_symlink() or (inside(resolved, internal) and resolved != internal / "board.html"):
                 raise CompanionError("不能输出到项目事实记录目录；内部仅允许 board.html")
             if path.exists() and resolved != internal / "board.html":
                 raise CompanionError("输出文件已经存在；请使用一个新的文件名以保留之前的状态快照")

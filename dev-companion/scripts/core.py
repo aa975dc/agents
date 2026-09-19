@@ -1,187 +1,51 @@
-"""Project facts and verification for Dev Companion (Python 3.9+, stdlib only)."""
+"""Project facts and verification for Dev Companion (Python 3.9+, stdlib only).
+
+P2-01 起共享工具下沉 packages/agents_kernel，本模块保留原公共名作兼容 Facade
+（re-export 或薄委托），并继续负责锁、状态机、快照、聚合与渲染。依赖方向：
+core → kernel；core → archives（restore-pending 探测走其公共 API）；
+core 可懒加载 journey/releases 做聚合——journey/releases 对 core 已无模块级依赖，环已解除。
+"""
 import contextlib
-import datetime
-import hashlib
 import html
-import json
 import os
-from pathlib import Path, PurePosixPath
-import re
-import signal
 import stat
-import subprocess
-import tempfile
+import subprocess  # noqa: F401 — re-export：tests 以 "core.subprocess.Popen" 为 patch 目标（模块单例）
+import sys
 import uuid
+from pathlib import Path
 
 
-class CompanionError(ValueError):
-    pass
+def _kernel_path():
+    """定位仓库根 packages/agents_kernel 并加入 sys.path（用 __file__ 相对定位）。
+
+    兼容从仓库（<repo>/dev-companion/scripts）与从插件目录（scripts 与 packages 同根）
+    两种布局。脱离仓库根的独立安装产物由 P2-05 的 vendor 构建提供
+    （02_TARGET_ARCHITECTURE.md §3），此处不引入第二套机制。
+    """
+    for base in Path(__file__).resolve().parents:
+        if (base / "packages" / "agents_kernel").is_dir():
+            packages = str(base / "packages")
+            if packages not in sys.path:
+                sys.path.insert(0, packages)
+            return
+    raise ImportError("找不到 agents_kernel：需要仓库根 packages/agents_kernel（插件独立分发由 vendor 构建提供）")
 
 
-def now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+_kernel_path()
 
+from agents_kernel.atomicio import read_json, write_json
+from agents_kernel.digest import content_digest, digest, sha256_file
+from agents_kernel.paths import EXCLUDED_DIRS, realpath, sensitive
+from agents_kernel.process import now, redact_output, run_argv
+from agents_kernel.validation import (CompanionError, relative_path, safe_file, strings, text,
+                                      validate_scope)
 
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-
-
-def read_json(path):
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CompanionError("无法读取有效的 JSON：%s" % path) from exc
-
-
-def text(value, label):
-    if not isinstance(value, str) or not value.strip():
-        raise CompanionError(label + "不能为空")
-    return value.strip()
-
-
-def strings(value, label, nonempty=False):
-    if not isinstance(value, list) or (nonempty and not value):
-        raise CompanionError(label + "必须是%s列表" % ("非空" if nonempty else ""))
-    return [text(item, label) for item in value]
-
-
-OUTPUT_LIMIT = 65536
-SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
-    re.compile(r"(?i)\b(?:[A-Za-z0-9_.-]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*)"
-               r"(?:\s*[:=]\s*|_)[A-Za-z0-9._~+/=-]{4,}"),
-    re.compile(r"\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b"),
-    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
-)
-
-
-def redact_output(value):
-    raw = value if isinstance(value, bytes) else str(value).encode("utf-8", errors="replace")
-    decoded = raw[:OUTPUT_LIMIT].decode("utf-8", errors="replace")
-    cleaned = decoded
-    for pattern in SECRET_PATTERNS:
-        cleaned = pattern.sub("[REDACTED]", cleaned)
-    return {"output": cleaned, "output_sha256": hashlib.sha256(raw).hexdigest(),
-            "output_redacted": cleaned != decoded, "truncated": len(raw) > OUTPUT_LIMIT}
-
-
-def run_argv(argv, cwd, timeout, timeout_message):
-    result = {"argv": argv, "started_at": now(), "executed": False, "exit_code": None,
-              "timed_out": False, "termination_confirmed": True}
-    error = ""
-    with tempfile.TemporaryFile() as output:
-        process = None
-        try:
-            process = subprocess.Popen(argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
-                                       stdout=output, stderr=subprocess.STDOUT, shell=False,
-                                       start_new_session=(os.name == "posix"))
-            result["executed"] = True
-            result["exit_code"] = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            result.update(timed_out=True, termination_confirmed=False)
-            error = timeout_message
-            if process is not None:
-                try:
-                    if os.name == "posix":
-                        os.killpg(process.pid, signal.SIGTERM)
-                    else:
-                        process.terminate()
-                    process.wait(timeout=1)
-                except (ProcessLookupError, subprocess.TimeoutExpired):
-                    pass
-                finally:
-                    try:
-                        if os.name == "posix":
-                            os.killpg(process.pid, signal.SIGKILL)
-                        elif process.poll() is None:
-                            process.kill()
-                    except ProcessLookupError:
-                        pass
-                    try:
-                        process.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        pass
-        except (OSError, ValueError) as exc:
-            error = str(exc)
-        output.seek(0)
-        body = output.read(OUTPUT_LIMIT + 1)
-    combined = (error + "\n").encode() + body if error else body
-    result.update(finished_at=now(), **redact_output(combined))
-    return result
-
-
-EXCLUDED_DIRS = {".git", ".dev-companion", "node_modules", ".venv", "venv", "__pycache__",
-                 ".pytest_cache", ".mypy_cache", "dist", "build", ".next"}
-
-
-def sensitive(name):
-    name = name.lower()
-    return (name == ".env" or name.startswith(".env.") or
-            name in {"id_rsa", "id_ed25519", "credentials.json", ".npmrc", ".pypirc"} or
-            name.endswith((".pem", ".key", ".p12", ".pfx")))
-
-
-def relative_path(value):
-    value = text(value, "文件路径")
-    path = PurePosixPath(value)
-    if (path.is_absolute() or "\\" in value or ":" in value or
-            any(p in {"", ".", ".."} for p in value.split("/")) or
-            any(p in EXCLUDED_DIRS for p in path.parts) or any(sensitive(p) for p in path.parts)):
-        raise CompanionError("文件路径不在支持的普通项目文件范围：" + value)
-    return value
-
-
-def safe_file(project, name, exists=False):
-    name = relative_path(name)
-    path = project
-    for part in PurePosixPath(name).parts:
-        path = path / part
-        if path.is_symlink():
-            raise CompanionError("文件链接不在支持范围：" + name)
-    if path.exists() and not path.is_file():
-        raise CompanionError("需要普通文件：" + name)
-    if exists and not path.is_file():
-        raise CompanionError("找不到产物文件：" + name)
-    return path
-
-
-def validate_scope(raw):
-    if not isinstance(raw, dict):
-        raise CompanionError("需求必须是 JSON 对象")
-    scope = {key: text(raw.get(key), key) for key in ("title", "goal", "audience", "scenario")}
-    for key in ("out_of_scope", "assumptions"):
-        scope[key] = strings(raw.get(key, []), key)
-    features = raw.get("features")
-    if not isinstance(features, list) or not features:
-        raise CompanionError("首版至少需要一项功能")
-    scope["features"] = []
-    seen = set()
-    for item in features:
-        if not isinstance(item, dict):
-            raise CompanionError("功能必须是对象")
-        identifier = text(item.get("id"), "功能编号")
-        if not all(c.isascii() and (c.isalnum() or c in "-_") for c in identifier) or identifier in seen:
-            raise CompanionError("功能编号须唯一且仅含英文字母、数字、下划线或短横线")
-        seen.add(identifier)
-        paths = strings(item.get("allowed_paths"), "可修改文件", True)
-        paths = list(dict.fromkeys(relative_path(p) for p in paths))
-        commands = item.get("check_commands", [])
-        if not isinstance(commands, list):
-            raise CompanionError("检查命令必须为参数数组的列表")
-        commands = [strings(c, "检查命令参数", True) for c in commands]
-        needs_user = item.get("requires_user_acceptance", True)
-        if type(needs_user) is not bool:
-            raise CompanionError("requires_user_acceptance 必须为布尔值")
-        scope["features"].append({"id": identifier, "title": text(item.get("title"), "功能名称"),
-                                  "acceptance_criteria": strings(item.get("acceptance_criteria"), "验收条件", True),
-                                  "allowed_paths": paths, "check_commands": commands,
-                                  "requires_user_acceptance": needs_user})
-    return scope
+from archives import ArchiveError, pending_restore
 
 
 class Project:
     def __init__(self, path):
-        self.root = Path(path).resolve()
+        self.root = realpath(path)
         if not self.root.is_dir():
             raise CompanionError("项目目录不存在")
         self.data = self.root / ".dev-companion"
@@ -190,14 +54,14 @@ class Project:
         self.state_path = self.data / "state.json"
 
     def recovery_status(self):
-        directory = self.data / "archives"
-        pending = directory / "restore-pending.json"
-        if directory.is_symlink() or pending.is_symlink():
-            raise CompanionError("存档恢复记录路径异常，请先核查")
-        if not pending.exists():
+        # 探测走 archives 公共 API；内部布局（archives/restore-pending.json）属主是 archives.py。
+        try:
+            info = pending_restore(self.root)
+        except ArchiveError as exc:
+            raise CompanionError(str(exc)) from exc
+        if info is None:
             return None
-        record = read_json(pending)
-        return {"required": True, "safety_archive_id": record.get("safety_archive_id") if isinstance(record, dict) else None,
+        return {"required": True, "safety_archive_id": info["safety_archive_id"],
                 "message": "上次恢复未完成；请先核对保护存档和 restore-pending.json，暂停制作与验收"}
 
     def orphan_release_note(self):
@@ -299,17 +163,7 @@ class Project:
         state["revision"] += 1
         state["updated_at"] = now()
         state["events"].append({"revision": state["revision"], "at": state["updated_at"], **event})
-        fd, temporary = tempfile.mkstemp(prefix="state-", suffix=".tmp", dir=str(self.data))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.state_path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        write_json(self.state_path, state, prefix="state-", suffix=".tmp")
 
     def snapshot(self):
         files, excluded, total = {}, [], 0
@@ -336,11 +190,11 @@ class Project:
                 total += info.st_size
                 if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
                     raise CompanionError("项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）")
-                content = path.read_bytes()
+                sha256_hex, size = sha256_file(path)
                 after = path.stat()
-                if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or len(content) != info.st_size:
+                if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or size != info.st_size:
                     raise CompanionError("项目文件正在变化，请等待写入结束后刷新")
-                files[relative] = digest({"sha256": hashlib.sha256(content).hexdigest(), "mode": stat.S_IMODE(info.st_mode)})
+                files[relative] = content_digest(sha256_hex, stat.S_IMODE(info.st_mode))
         return {"files": files, "fingerprint": digest(files), "excluded": sorted(excluded)}
 
     def init(self, scope):

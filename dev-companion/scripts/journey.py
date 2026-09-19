@@ -1,12 +1,34 @@
 """Persist the six product-design stages without changing legacy execution records."""
 import copy
-import hashlib
-import json
-import os
+import os  # noqa: F401 — re-export：tests 以 "journey.os.replace" 为 patch 目标（os 模块单例，kernel 原子写同样受影响）
 import stat
-import tempfile
+import sys
+from pathlib import Path
 
-from core import CompanionError, digest, now, read_json, relative_path, safe_file, strings, text, validate_scope
+
+def _kernel_path():
+    """定位仓库根 packages/agents_kernel 并加入 sys.path（用 __file__ 相对定位）。
+
+    兼容从仓库（<repo>/dev-companion/scripts）与从插件目录（scripts 与 packages 同根）
+    两种布局。脱离仓库根的独立安装产物由 P2-05 的 vendor 构建提供
+    （02_TARGET_ARCHITECTURE.md §3），此处不引入第二套机制。
+    """
+    for base in Path(__file__).resolve().parents:
+        if (base / "packages" / "agents_kernel").is_dir():
+            packages = str(base / "packages")
+            if packages not in sys.path:
+                sys.path.insert(0, packages)
+            return
+    raise ImportError("找不到 agents_kernel：需要仓库根 packages/agents_kernel（插件独立分发由 vendor 构建提供）")
+
+
+_kernel_path()
+
+from agents_kernel.atomicio import read_json, write_json
+from agents_kernel.digest import content_digest, digest, sha256_bytes
+from agents_kernel.process import now
+from agents_kernel.validation import (CompanionError, feature_id, relative_path, safe_file, strings, text,
+                                      validate_scope)
 
 
 STAGES = ("concept", "requirements", "product", "flow", "prototype", "technical")
@@ -50,8 +72,7 @@ def product_scope(raw, complete=True):
         feature = {}
         if complete or "id" in item:
             identifier = text(item.get("id"), "功能编号")
-            if identifier in seen or not all(c.isascii() and (c.isalnum() or c in "-_") for c in identifier):
-                raise CompanionError("功能编号须唯一且仅含英文字母、数字、下划线或短横线")
+            feature_id(identifier, seen)
             seen.add(identifier)
             feature["id"] = identifier
         if complete or "title" in item:
@@ -196,7 +217,7 @@ class Journey:
                 if (before.st_mtime_ns, before.st_ctime_ns, before.st_mode, before.st_size) != (
                         after.st_mtime_ns, after.st_ctime_ns, after.st_mode, len(content)):
                     raise CompanionError("阶段产物正在变化，请等待写入结束后重试：" + name)
-                result[name] = digest({"sha256": hashlib.sha256(content).hexdigest(), "mode": stat.S_IMODE(before.st_mode)})
+                result[name] = content_digest(sha256_bytes(content), stat.S_IMODE(before.st_mode))
             except OSError as exc:
                 raise CompanionError("无法读取阶段产物：" + name) from exc
         return result
@@ -283,18 +304,8 @@ class Journey:
 
     def _write(self, state):
         self._guard_path()
-        temporary = None
         try:
-            fd, temporary = tempfile.mkstemp(prefix="journey-", suffix=".tmp", dir=str(self.project.data))
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            self._guard_path()
-            os.replace(temporary, self.path)
+            # before_replace 保留原有的"写入后、替换前"再核查符号链接语义。
+            write_json(self.path, state, prefix="journey-", suffix=".tmp", before_replace=self._guard_path)
         except OSError as exc:
             raise CompanionError("无法保存产品阶段记录；原文件保持不变") from exc
-        finally:
-            if temporary and os.path.exists(temporary):
-                os.unlink(temporary)
