@@ -6,6 +6,8 @@ import html
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
+import signal
 import stat
 import subprocess
 import tempfile
@@ -41,6 +43,71 @@ def strings(value, label, nonempty=False):
     if not isinstance(value, list) or (nonempty and not value):
         raise CompanionError(label + "必须是%s列表" % ("非空" if nonempty else ""))
     return [text(item, label) for item in value]
+
+
+OUTPUT_LIMIT = 65536
+SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"(?i)\b(?:[A-Za-z0-9_.-]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*)"
+               r"(?:\s*[:=]\s*|_)[A-Za-z0-9._~+/=-]{4,}"),
+    re.compile(r"\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
+)
+
+
+def redact_output(value):
+    raw = value if isinstance(value, bytes) else str(value).encode("utf-8", errors="replace")
+    decoded = raw[:OUTPUT_LIMIT].decode("utf-8", errors="replace")
+    cleaned = decoded
+    for pattern in SECRET_PATTERNS:
+        cleaned = pattern.sub("[REDACTED]", cleaned)
+    return {"output": cleaned, "output_sha256": hashlib.sha256(raw).hexdigest(),
+            "output_redacted": cleaned != decoded, "truncated": len(raw) > OUTPUT_LIMIT}
+
+
+def run_argv(argv, cwd, timeout, timeout_message):
+    result = {"argv": argv, "started_at": now(), "executed": False, "exit_code": None,
+              "timed_out": False, "termination_confirmed": True}
+    error = ""
+    with tempfile.TemporaryFile() as output:
+        process = None
+        try:
+            process = subprocess.Popen(argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
+                                       stdout=output, stderr=subprocess.STDOUT, shell=False,
+                                       start_new_session=(os.name == "posix"))
+            result["executed"] = True
+            result["exit_code"] = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            result.update(timed_out=True, termination_confirmed=False)
+            error = timeout_message
+            if process is not None:
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGTERM)
+                    else:
+                        process.terminate()
+                    process.wait(timeout=1)
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    pass
+                finally:
+                    try:
+                        if os.name == "posix":
+                            os.killpg(process.pid, signal.SIGKILL)
+                        elif process.poll() is None:
+                            process.kill()
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+        except (OSError, ValueError) as exc:
+            error = str(exc)
+        output.seek(0)
+        body = output.read(OUTPUT_LIMIT + 1)
+    combined = (error + "\n").encode() + body if error else body
+    result.update(finished_at=now(), **redact_output(combined))
+    return result
 
 
 EXCLUDED_DIRS = {".git", ".dev-companion", "node_modules", ".venv", "venv", "__pycache__",
@@ -185,6 +252,39 @@ class Project:
         finally:
             lock.unlink()
 
+    def recover_lock(self, authorized=False):
+        if authorized is not True:
+            raise CompanionError("请先确认中断现场及全部写入进程已停止，再授权清理失效锁")
+        if os.name != "posix":
+            raise CompanionError("当前平台不支持自动核对锁进程，请先人工核查锁与进程")
+        lock = self.data / "write.lock"
+        if self.data.is_symlink() or lock.is_symlink():
+            raise CompanionError("锁路径不能是文件链接")
+        if not lock.exists():
+            return {"cleared": False, "message": "没有需要清理的锁"}
+        before = lock.stat()
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 32:
+            raise CompanionError("锁内容异常，请保留现场核查")
+        content = lock.read_text(encoding="utf-8")
+        if not content.isascii() or not content.isdigit() or int(content) < 1:
+            raise CompanionError("无法识别锁的进程编号，请保留现场核查")
+        pid = int(content)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass
+        except (PermissionError, OverflowError, OSError) as exc:
+            raise CompanionError("无法确认锁进程已经退出，请保留现场核查") from exc
+        else:
+            raise CompanionError("锁所属进程仍存在，不能清理")
+        after = lock.lstat()
+        if (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns, before.st_mode) != (
+                after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns, after.st_mode):
+            raise CompanionError("锁在核查期间发生变化，请重新核查")
+        lock.unlink()
+        return {"cleared": True, "previous_pid": pid,
+                "message": "已清理退出进程的锁；未终止任何进程，也未改变任务或发布状态"}
+
     def commit(self, state, event):
         state["revision"] += 1
         state["updated_at"] = now()
@@ -248,6 +348,7 @@ class Project:
         with self.locked():
             state = self.load()
             self.require_revision(state, revision)
+            self.require_plan(state)
             state["confirmed"] = True
             self.commit(state, {"kind": "scope_confirmed", "scope_version": state["scope_version"]})
             return {"revision": state["revision"], "scope_version": state["scope_version"], "confirmed": True}
@@ -266,8 +367,20 @@ class Project:
             previous = {f["id"]: f for f in state["scope"]["features"]}
             old = state["scope"]
             context_changed = any(old[key] != scope[key] for key in ("goal", "audience", "scenario", "assumptions", "out_of_scope"))
-            state["tasks"] = {f["id"]: state["tasks"][f["id"]] if not context_changed and previous.get(f["id"]) == f
-                              else {"status": "pending"} for f in scope["features"]}
+            tasks = {}
+            for feature in scope["features"]:
+                identifier = feature["id"]
+                old_task = state["tasks"].get(identifier, {})
+                task = old_task if not context_changed and previous.get(identifier) == feature else {
+                    "status": "pending", "feedback": old_task.get("feedback", [])}
+                for item in task.get("feedback", []):
+                    if item["kind"] == "requirement":
+                        if item.get("requirement_basis") == self.requirement_basis(scope, feature):
+                            item.pop("resolved_in_scope", None)
+                        else:
+                            item["resolved_in_scope"] = state["scope_version"] + 1
+                tasks[identifier] = task
+            state["tasks"] = tasks
             state.update(scope=scope, scope_version=state["scope_version"] + 1, confirmed=False)
             self.commit(state, {"kind": "scope_changed", "previous_scope": old, "scope": scope})
             return {"revision": state["revision"], "scope_version": state["scope_version"],
@@ -290,22 +403,46 @@ class Project:
         if not state["confirmed"]:
             raise CompanionError("首版范围尚未确认，暂不执行制作或检查")
 
+    def planning_context(self):
+        from journey import Journey
+        return Journey(self).context()
+
+    def require_plan(self, state):
+        from journey import Journey
+        Journey(self).require_ready(state["scope"])
+
+    def planning_fingerprint(self):
+        return (self.planning_context() or {}).get("fingerprint")
+
+    @staticmethod
+    def requirement_basis(scope, feature):
+        return digest({"context": {k: scope[k] for k in ("goal", "audience", "scenario", "out_of_scope", "assumptions")},
+                       "feature": {k: feature[k] for k in ("id", "title", "acceptance_criteria", "requires_user_acceptance")}})
+
     def packet(self, identifier):
         with self.locked():
             state = self.load()
             self.require_confirmed(state)
             self.require_idle(state)
+            self.require_plan(state)
             feature, task = self.feature(state, identifier)
+            feedback = task.get("feedback", [])
+            if any(f["kind"] == "requirement" and not f.get("resolved_in_scope") for f in feedback):
+                raise CompanionError("需求反馈尚未处理；请先更新并确认需求范围")
             for name in feature["allowed_paths"]:
                 safe_file(self.root, name)
             baseline = self.snapshot()
             run = {"run_id": uuid.uuid4().hex, "scope_version": state["scope_version"],
-                   "started_at": now(), "baseline": baseline["files"]}
+                   "started_at": now(), "baseline": baseline["files"],
+                   "planning_fingerprint": self.planning_fingerprint()}
             task.clear()
-            task.update(status="running", run=run)
+            task.update(status="running", run=run, feedback=feedback)
             self.commit(state, {"kind": "dispatched", "feature_id": identifier, "run_id": run["run_id"]})
+            context = self.planning_context()
+            interfaces = (context or {}).get("records", {}).get("technical", {}).get("interfaces", [])
             return {"feature_id": identifier, "run_id": run["run_id"], "scope_version": run["scope_version"],
                     "revision": state["revision"], "project": str(self.root), **feature,
+                    "planning_context": context, "interfaces": [i for i in interfaces if i["feature_id"] == identifier],
                     "instruction": "仅修改 allowed_paths；执行者回报 implemented 仍需独立检查；不要自行改进度记录"}
 
     def receipt(self, raw):
@@ -318,10 +455,11 @@ class Project:
             feature, task = self.feature(state, identifier)
             run = task.get("run", {})
             if (task["status"] != "running" or raw.get("run_id") != run.get("run_id") or
-                    raw.get("scope_version") != state["scope_version"]):
+                    raw.get("scope_version") != state["scope_version"] or
+                    run.get("planning_fingerprint") != self.planning_fingerprint()):
                 raise CompanionError("执行回报重复、过期或不属于当前任务")
-            if raw.get("status") not in {"implemented", "blocked"}:
-                raise CompanionError("执行回报仅接受 implemented 或 blocked")
+            if raw.get("status") not in {"implemented", "verified_existing", "blocked"}:
+                raise CompanionError("执行回报仅接受 implemented、verified_existing 或 blocked")
             text(raw.get("summary"), "本次说明")
             changed = strings(raw.get("changed_files"), "修改文件")
             for name in changed:
@@ -331,10 +469,15 @@ class Project:
                       if current.get(p) != run["baseline"].get(p)}
             if set(changed) != actual or not actual.issubset(feature["allowed_paths"]):
                 raise CompanionError("实际修改与回报/允许范围不一致，请核查后重新回报")
-            for name in strings(raw.get("evidence_files", []), "证据文件"):
+            evidence_files = strings(raw.get("evidence_files", []), "证据文件")
+            for name in evidence_files:
                 safe_file(self.root, name, exists=True)
                 if name not in feature["allowed_paths"]:
                     raise CompanionError("执行回报的证据文件不在本次约定文件范围")
+            if raw["status"] == "implemented" and not actual:
+                raise CompanionError("implemented 回报必须包含实际修改；复核既有实现请使用 verified_existing")
+            if raw["status"] == "verified_existing" and (actual or not evidence_files):
+                raise CompanionError("verified_existing 只适用于零修改复核，并且必须列出范围内证据文件")
             if raw["status"] == "blocked":
                 text(raw.get("blocker"), "阻塞原因")
             task.update(status="blocked" if raw["status"] == "blocked" else "awaiting_review",
@@ -343,49 +486,48 @@ class Project:
             return {"revision": state["revision"], "status": task["status"],
                     "message": "执行回报已记录；尚未计入已验收"}
 
-    def check(self, identifier):
+    def check(self, identifier, kind="feature"):
+        if kind not in {"feature", "integration"}:
+            raise CompanionError("检查类型必须为 feature 或 integration")
         with self.locked():
             state = self.load()
             self.require_confirmed(state)
             self.require_idle(state)
+            self.require_plan(state)
             feature, task = self.feature(state, identifier)
             if task["status"] not in {"awaiting_review", "accepted"}:
                 raise CompanionError("先完成当前制作回报，再进行检查")
-            if not feature["check_commands"]:
+            commands = feature["check_commands"]
+            context = self.planning_context()
+            if kind == "integration":
+                interfaces = (context or {}).get("records", {}).get("technical", {}).get("interfaces", [])
+                commands = [argv for interface in interfaces if interface["feature_id"] == identifier
+                            for argv in interface["check_commands"]]
+            if not commands:
                 raise CompanionError("尚未约定可执行检查，不能标为通过；请完善需求范围后再确认")
             for name in feature["allowed_paths"]:
                 safe_file(self.root, name)
             before = self.snapshot()
+            planning_before = (context or {}).get("fingerprint")
             results = []
-            for argv in feature["check_commands"]:
-                try:
-                    with tempfile.TemporaryFile() as output:
-                        completed = subprocess.run(argv, cwd=str(self.root), stdin=subprocess.DEVNULL,
-                                                   stdout=output, stderr=subprocess.STDOUT, timeout=120, shell=False)
-                        output.seek(0)
-                        body = output.read(65537)
-                    results.append({"argv": argv, "exit_code": completed.returncode,
-                                    "output": body[:65536].decode("utf-8", errors="replace"),
-                                    "truncated": len(body) > 65536, "executed": True})
-                except subprocess.TimeoutExpired:
-                    results.append({"argv": argv, "exit_code": None, "output": "检查超时（120秒）",
-                                    "executed": True, "truncated": False})
-                except OSError as exc:
-                    results.append({"argv": argv, "exit_code": None, "output": str(exc),
-                                    "executed": False, "truncated": False})
+            for argv in commands:
+                results.append(run_argv(argv, self.root, 120, "检查超时（120秒）"))
                 if results[-1]["exit_code"] != 0:
                     break
             after = self.snapshot()
-            passed = (len(results) == len(feature["check_commands"]) and
+            passed = (len(results) == len(commands) and
                       all(r["executed"] and r["exit_code"] == 0 for r in results) and
-                      before["fingerprint"] == after["fingerprint"])
+                      before["fingerprint"] == after["fingerprint"] and
+                      planning_before == self.planning_fingerprint())
             verification = {"id": uuid.uuid4().hex, "at": now(), "passed": passed,
+                            "kind": kind, "planning_fingerprint": planning_before,
                             "fingerprint": after["fingerprint"], "content_changed": before["fingerprint"] != after["fingerprint"],
                             "results": results, "excluded_paths": after["excluded"]}
-            task.update(status="awaiting_review", verification=verification)
+            task.update(status="awaiting_review")
+            task["verification" if kind == "feature" else "integration"] = verification
             task.pop("acceptance", None)
             self.commit(state, {"kind": "checked", "feature_id": identifier,
-                                "verification_id": verification["id"], "passed": passed})
+                                "verification_id": verification["id"], "check_kind": kind, "passed": passed})
             return {"revision": state["revision"], **verification}
 
     def accept(self, identifier, note, user_confirmed=False):
@@ -394,17 +536,42 @@ class Project:
             state = self.load()
             self.require_confirmed(state)
             self.require_idle(state)
+            self.require_plan(state)
             feature, task = self.feature(state, identifier)
             verification = task.get("verification", {})
+            fingerprint = self.snapshot()["fingerprint"]
+            planning = self.planning_fingerprint()
             if (task["status"] != "awaiting_review" or not verification.get("passed") or
-                    verification.get("fingerprint") != self.snapshot()["fingerprint"]):
+                    verification.get("fingerprint") != fingerprint or verification.get("planning_fingerprint") != planning):
                 raise CompanionError("缺少当前内容的成功检查，请先运行 check")
+            integration = task.get("integration", {})
+            if planning is not None and (not integration.get("passed") or
+                    integration.get("fingerprint") != fingerprint or integration.get("planning_fingerprint") != planning):
+                raise CompanionError("缺少当前接口约定的成功联调，请运行 check --kind integration")
             if feature["requires_user_acceptance"] and not user_confirmed:
                 raise CompanionError("此功能还需要用户实际试用并确认")
             task.update(status="accepted", acceptance={"at": now(), "note": note,
                         "user_confirmed": user_confirmed, "verification_id": verification["id"]})
             self.commit(state, {"kind": "accepted", "feature_id": identifier, "note": note})
             return {"revision": state["revision"], "status": "accepted"}
+
+    def feedback(self, identifier, kind, note):
+        if kind not in {"defect", "experience", "requirement", "environment"}:
+            raise CompanionError("无法识别反馈类型")
+        note = text(note, "反馈说明")
+        with self.locked():
+            state = self.load()
+            self.require_idle(state)
+            feature, task = self.feature(state, identifier)
+            feedback = {"kind": kind, "note": note, "at": now(), "scope_version": state["scope_version"]}
+            if kind == "requirement":
+                feedback["requirement_basis"] = self.requirement_basis(state["scope"], feature)
+            task.setdefault("feedback", []).append(feedback)
+            task.update(status="blocked", blocker=note)
+            for key in ("acceptance", "verification", "integration"):
+                task.pop(key, None)
+            self.commit(state, {"kind": "feedback_recorded", "feature_id": identifier, "feedback": feedback})
+            return {"revision": state["revision"], "status": "blocked", "feedback": feedback}
 
     def block(self, identifier, reason):
         reason = text(reason, "阻塞原因")
@@ -417,19 +584,38 @@ class Project:
             return {"revision": state["revision"], "status": "blocked",
                     "message": "已记录阻塞；此命令不会替你终止外部智能体，请确认实际写入已停止"}
 
-    def status(self):
+    def status(self, include_release=True, snapshot=None):
+        from journey import Journey
+        planning = Journey(self).status()
+        if not self.state_path.exists() and not self.state_path.is_symlink() and planning:
+            view = {"schema_version": 1, "title": "产品规划", "goal": "先明确产品，再形成可执行范围",
+                    "scope": {"out_of_scope": [], "assumptions": []}, "revision": 0, "scope_version": 0,
+                    "confirmed": False, "updated_at": planning.get("updated_at", "尚未建立技术范围"), "observed_at": now(),
+                    "counts": {s: 0 for s in LABELS}, "total": 0, "overall_percent": None,
+                    "next_step": planning["next_step"], "features": [], "excluded_paths": [],
+                    "recovery": self.recovery_status(), "publication": "未核验发布状态", "history": []}
+            return self.decorate_status(view, planning, include_release)
         state = self.load()
         recovery = self.recovery_status()
-        snapshot = self.snapshot()
+        snapshot = snapshot or self.snapshot()
+        planning_fingerprint = self.planning_fingerprint()
         features, counts = [], {s: 0 for s in ("pending", "running", "awaiting_review", "accepted", "blocked")}
         for feature in state["scope"]["features"]:
             task = state["tasks"][feature["id"]]
-            stale = (task.get("verification", {}).get("fingerprint") != snapshot["fingerprint"])
+            verification = task.get("verification", {})
+            integration = task.get("integration", {})
+            integration_stale = (not integration.get("passed") or integration.get("fingerprint") != snapshot["fingerprint"] or
+                                 integration.get("planning_fingerprint") != planning_fingerprint)
+            stale = (verification.get("fingerprint") != snapshot["fingerprint"] or
+                     verification.get("planning_fingerprint") != planning_fingerprint or
+                     (planning_fingerprint is not None and integration_stale))
             status = "awaiting_review" if task["status"] == "accepted" and stale else task["status"]
             counts[status] += 1
             features.append({**feature, "status": status, "evidence_stale": stale and "verification" in task,
                              "blocker": task.get("blocker") or task.get("receipt", {}).get("blocker"),
-                             "verification": task.get("verification"), "acceptance": task.get("acceptance")})
+                             "verification": task.get("verification"), "integration": task.get("integration"),
+                             "integration_stale": integration_stale,
+                             "feedback": task.get("feedback", []), "acceptance": task.get("acceptance")})
         total = len(features)
         if recovery:
             next_step = recovery["message"]
@@ -445,17 +631,58 @@ class Project:
             next_step = "查看受阻原因，补充所需资料或决定"
         else:
             next_step = "本版功能已验收；查看使用说明与存档，发布另行决定"
-        return {"schema_version": 1, "title": state["scope"]["title"], "goal": state["scope"]["goal"],
+        view = {"schema_version": 1, "title": state["scope"]["title"], "goal": state["scope"]["goal"],
                 "scope": state["scope"], "revision": state["revision"], "scope_version": state["scope_version"],
                 "confirmed": state["confirmed"], "updated_at": state["updated_at"], "observed_at": now(),
                 "counts": counts, "total": total, "overall_percent": (counts["accepted"] * 100 // total) if state["confirmed"] and not recovery else None,
                 "next_step": next_step, "features": features, "excluded_paths": snapshot["excluded"],
+                "source_fingerprint": snapshot["fingerprint"],
                 "recovery": recovery,
                 "publication": "未核验发布状态", "history": state["events"][-10:]}
+        return self.decorate_status(view, planning, include_release)
+
+    def decorate_status(self, view, planning, include_release):
+        release = None
+        if include_release:
+            from releases import ReleaseStore
+            release = ReleaseStore(self).status(current_view=view)
+        view.update(planning=planning, release=release)
+        if planning and not planning["complete"]:
+            stage = planning["current_stage"]
+            view["next_step"] = planning["next_step"]
+        elif not view["confirmed"]:
+            stage = "technical"
+        elif view["overall_percent"] == 100:
+            stage = "release" if release and release["status"] != "prepared" else "release_preparation"
+        elif view["counts"]["awaiting_review"]:
+            stage = "integration" if planning and any(
+                f["integration_stale"] for f in view["features"] if f["status"] == "awaiting_review") else "acceptance"
+        else:
+            stage = "implementation"
+        if view.get("recovery"):
+            view["next_step"] = view["recovery"]["message"]
+        if release:
+            view["publication"] = RELEASE_LABELS.get(release["status"], release["status"])
+            if release.get("source_stale"):
+                view["publication"] += "；当前源码或依据已改变，历史发布结果不代表当前版本"
+            if view["overall_percent"] == 100 and not view.get("recovery"):
+                view["next_step"] = release.get("next_step", "查看发布记录，按授权范围执行或核验")
+        view.update(current_stage=stage, stage_label=STAGE_LABELS[stage])
+        return view
 
 
 LABELS = {"pending": "待开始", "running": "制作中", "awaiting_review": "待验收",
           "accepted": "已验收", "blocked": "受阻"}
+
+STAGE_LABELS = dict(zip(("concept", "requirements", "product", "flow", "prototype", "technical", "implementation",
+                        "integration", "acceptance", "release_preparation", "release"),
+                       ("概念讲解", "需求问答", "产品方案", "产品流程", "原型与交互", "技术方案与任务", "编码实现",
+                        "前后端联调", "测试与验收", "发布准备", "发布与核验")))
+RELEASE_LABELS = {"prepared": "发布方案已准备", "deploying": "部署进行中，结果待核对", "deploy_failed": "部署失败",
+                  "deployed_unverified": "已执行部署，尚未核验", "verifying": "发布核验进行中", "verify_failed": "发布核验失败",
+                  "local_verified": "本地发布验证通过", "staging_verified": "测试环境验证通过", "published": "生产环境约定检查通过",
+                  "rolling_back": "回退进行中", "rolled_back_unverified": "已执行回退，尚未核验", "rollback_failed": "回退失败"}
+RELEASE_LABELS["interrupted"] = "已记录中断现场；发布结果仍未核验"
 
 
 def render_markdown(view):
@@ -464,6 +691,7 @@ def render_markdown(view):
     progress = ("恢复未完成，暂不能计算" if view.get("recovery") else "范围待确认，暂不能计算") if view["overall_percent"] is None else "%s/%s 项已验收（%s%%）" % (
         view["counts"]["accepted"], view["total"], view["overall_percent"])
     lines = ["# " + cell(view["title"]), "", cell(view["goal"]), "", "**本版完成度：** " + progress,
+             "**当前阶段：** " + view.get("stage_label", "编码实现"),
              "**推荐下一步：** " + view["next_step"], "", "| 功能 | 状态 | 提醒 |", "|---|---|---|"]
     for feature in view["features"]:
         notice = feature.get("blocker") or ("内容已变化，需要复查" if feature["evidence_stale"] else "")
@@ -493,10 +721,10 @@ def render_html(view):
 @media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#161a21;--text:#e8eaed;--muted:#abb6c7;--line:#3a4356;--blue:#85b7eb}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 system-ui,sans-serif}main{max-width:980px;margin:auto;padding:40px 24px}h1{font-size:32px;margin:12px 0}h2{font-size:24px}p{color:var(--muted)}.eyebrow{color:var(--blue);letter-spacing:.08em}.summary,article{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}.summary{margin:24px 0;border-left:5px solid var(--blue)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.badge{display:inline-block;border:1px solid var(--line);padding:2px 10px;border-radius:20px;font-size:14px}.accepted{color:#3b7a28}.blocked{color:#b35428}summary{cursor:pointer;color:var(--blue)}footer{margin-top:28px;color:var(--muted);font-size:14px}ul{padding-left:24px}</style>
 <main><div class="eyebrow">DEV COMPANION / 开发陪伴</div><h1>%s</h1><p>%s</p>
-<section class="summary"><h2>%s</h2><strong>下一步：%s</strong><p>这是本次读取的状态快照。重新运行进度命令可刷新；存档、验收与发布分别记录。</p></section>
+<section class="summary"><h2>%s</h2><p>当前阶段：%s</p><strong>下一步：%s</strong><p>这是本次读取的状态快照。重新运行进度命令可刷新；存档、验收与发布分别记录。</p></section>
 <div class="grid">%s</div><section><h2>本版范围</h2><p>暂不包含：%s</p><p>假设与待确认：%s</p></section>
 <footer>范围版本 %s · 记录更新 %s · 本次读取 %s<br>发布状态：%s</footer></main></html>''' % (
-        esc(view["title"]), esc(view["title"]), esc(view["goal"]), esc(progress), esc(view["next_step"]),
+        esc(view["title"]), esc(view["title"]), esc(view["goal"]), esc(progress), esc(view.get("stage_label", "编码实现")), esc(view["next_step"]),
         "".join(cards), esc("；".join(view["scope"]["out_of_scope"]) or "尚未列出"),
         esc("；".join(view["scope"]["assumptions"]) or "当前未列出"), view["scope_version"],
         esc(view["updated_at"]), esc(view["observed_at"]), esc(view["publication"]))

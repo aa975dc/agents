@@ -12,10 +12,31 @@ from core import CompanionError, Project, read_json, render_html, render_markdow
 
 
 def parser():
-    root = argparse.ArgumentParser(description="开发陪伴：需求、可信进度和明确范围的本地存档")
+    root = argparse.ArgumentParser(description="开发陪伴：产品规划、实现联调、可信验收与发布")
     root.add_argument("--project", default=".", help="项目目录")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor")
+    sub.add_parser("recover-lock").add_argument("--authorized", action="store_true")
+    from journey import STAGES
+    child = sub.add_parser("plan")
+    child.add_argument("--stage", choices=STAGES, required=True)
+    child.add_argument("--input", required=True)
+    child.add_argument("--revision", required=True, type=int)
+    child.add_argument("--complete", action="store_true")
+    child.add_argument("--user-confirmed", action="store_true")
+    sub.add_parser("planning-status")
+    sub.add_parser("release-status")
+    child = sub.add_parser("release-prepare")
+    child.add_argument("--input", required=True)
+    child.add_argument("--revision", required=True, type=int)
+    child = sub.add_parser("release-run")
+    child.add_argument("--action", choices=("deploy", "verify", "rollback"), required=True)
+    child.add_argument("--revision", required=True, type=int)
+    child.add_argument("--authorized", action="store_true", help="已明确授权本版本、目标环境及命令后使用")
+    child = sub.add_parser("release-reconcile")
+    child.add_argument("--revision", required=True, type=int)
+    child.add_argument("--note", required=True)
+    child.add_argument("--authorized", action="store_true", help="已核对中断现场且相关进程停止后使用")
     for name in ("init", "scope", "receipt"):
         child = sub.add_parser(name)
         child.add_argument("--input", required=True)
@@ -28,11 +49,17 @@ def parser():
     for name in ("packet", "check", "accept", "block"):
         child = sub.add_parser(name)
         child.add_argument("--feature", required=True)
+        if name == "check":
+            child.add_argument("--kind", choices=("feature", "integration"), default="feature")
         if name == "accept":
             child.add_argument("--note", required=True)
             child.add_argument("--user-confirmed", action="store_true")
         if name == "block":
             child.add_argument("--reason", required=True)
+    child = sub.add_parser("feedback")
+    child.add_argument("--feature", required=True)
+    child.add_argument("--kind", choices=("defect", "experience", "requirement", "environment"), required=True)
+    child.add_argument("--note", required=True)
     child = sub.add_parser("save")
     child.add_argument("--paths", nargs="+", required=True)
     child.add_argument("--summary", required=True)
@@ -51,8 +78,28 @@ def run(args):
     if name == "doctor":
         return {"python": sys.version.split()[0], "project": str(project.root),
                 "state_exists": project.state_path.is_file(), "git_available": bool(shutil.which("git")),
+                "planning_exists": (project.data / "journey.json").is_file(),
+                "release_exists": (project.data / "release.json").is_file(),
                 "archive_backend": "explicit-file-snapshots",
                 "message": "本地运行环境可用；此结果不代表宿主已加载插件或模型调用已成功"}
+    if name == "recover-lock":
+        return project.recover_lock(args.authorized)
+    if name in {"plan", "planning-status"}:
+        from journey import Journey
+        journey = Journey(project)
+        if name == "planning-status":
+            return {"record": journey.status()}
+        return journey.save(args.stage, read_json(args.input), args.revision, args.complete, args.user_confirmed)
+    if name.startswith("release-"):
+        from releases import ReleaseStore
+        store = ReleaseStore(project)
+        if name == "release-status":
+            return {"record": store.status()}
+        if name == "release-prepare":
+            return store.prepare(read_json(args.input), args.revision)
+        if name == "release-reconcile":
+            return store.reconcile(args.revision, args.note, args.authorized)
+        return store.run(args.action, args.revision, args.authorized)
     if name == "init":
         return project.init(read_json(args.input))
     if name == "scope":
@@ -61,8 +108,12 @@ def run(args):
         return project.confirm(args.revision)
     if name == "receipt":
         return project.receipt(read_json(args.input))
-    if name in {"packet", "check"}:
-        return getattr(project, name)(args.feature)
+    if name == "packet":
+        return project.packet(args.feature)
+    if name == "check":
+        return project.check(args.feature, args.kind)
+    if name == "feedback":
+        return project.feedback(args.feature, args.kind, args.note)
     if name == "accept":
         return project.accept(args.feature, args.note, args.user_confirmed)
     if name == "block":
@@ -73,9 +124,11 @@ def run(args):
                   render_html(view) if args.format == "html" else render_markdown(view))
         if args.out:
             path = Path(args.out).absolute()
-            if path.is_symlink() or path.resolve() == project.state_path.resolve():
-                raise CompanionError("不能覆盖项目状态或通过文件链接输出")
-            if path.exists() and path != project.data / "board.html":
+            resolved = path.resolve()
+            internal = project.data.resolve()
+            if path.is_symlink() or ((resolved == internal or internal in resolved.parents) and resolved != internal / "board.html"):
+                raise CompanionError("不能输出到项目事实记录目录；内部仅允许 board.html")
+            if path.exists() and resolved != internal / "board.html":
                 raise CompanionError("输出文件已经存在；请使用一个新的文件名以保留之前的状态快照")
             fd, temporary = tempfile.mkstemp(prefix=".board-", dir=str(path.parent))
             try:

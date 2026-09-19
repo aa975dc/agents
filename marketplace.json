@@ -11,9 +11,9 @@
     },
     {
       "name": "dev-companion",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "source": "./dev-companion",
-      "description": "需求澄清、开发交接、真实验收进度与明确文件范围的本地存档",
+      "description": "产品规划、开发联调、真实验收、发布核验与本地文件存档",
       "category": "developer-tools"
     }
   ]
