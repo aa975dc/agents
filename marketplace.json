@@ -1,0 +1,20 @@
+{
+  "name": "aa975dc-agents",
+  "description": "只读代码分析智能团与面向新手的开发陪伴插件",
+  "plugins": [
+    {
+      "name": "code-analysis-swarm",
+      "version": "0.2.1",
+      "source": "./code-analysis-swarm",
+      "description": "保留证据和覆盖声明的只读代码体检",
+      "category": "developer-tools"
+    },
+    {
+      "name": "dev-companion",
+      "version": "0.1.2",
+      "source": "./dev-companion",
+      "description": "需求澄清、开发交接、真实验收进度与明确文件范围的本地存档",
+      "category": "developer-tools"
+    }
+  ]
+}

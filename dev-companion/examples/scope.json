@@ -1,0 +1,23 @@
+{
+  "title": "支出合计演示",
+  "goal": "在本机计算一组整数金额的支出合计",
+  "audience": "第一次使用 AI 写代码的人",
+  "scenario": "先用最小演示理解需求、制作、检查和验收的区别",
+  "out_of_scope": ["图形界面", "账号和云同步", "小数金额", "上线"],
+  "assumptions": ["演示只接受整数金额；真实记账需求需要另行确认金额精度"],
+  "features": [
+    {
+      "id": "sum-expenses",
+      "title": "计算支出合计",
+      "acceptance_criteria": [
+        "20 元与 30 元两笔支出合计为 50 元",
+        "没有支出时合计为 0 元",
+        "负数金额被明确拒绝",
+        "小数、文字和布尔值被明确拒绝"
+      ],
+      "allowed_paths": ["ledger.py", "test_ledger.py"],
+      "check_commands": [["python3", "-m", "unittest", "test_ledger.py"]],
+      "requires_user_acceptance": true
+    }
+  ]
+}
