@@ -42,7 +42,7 @@
 | **A3** | 架构分析 | 高屋建瓴 → 高屋建 | 合并后的模块清单 + 入口分析 | **architecture.md** | G2 通过 |
 | **A4** | 依赖分析 | 纲举目 | manifest + 各块依赖边 + 包清单 | **dependency 报告 + 依赖边表 CSV** | G2 通过 |
 | **A5** | 构建流程 | 步就班 | 构建文件 + CI 配置 | **build.md**（管线阶段/工具链/产物/环境） | G2 通过 |
-| **A6** | 交叉验证 | 铁证如 | 高价值结论样本 | **verdicts**（confirmed / refuted） | G3 通过 |
+| **A6** | 交叉验证 | 铁证如 | 高价值结论样本 | **verdicts**（confirmed / refuted / unverified） | G3 通过 |
 | **A7** | 报告撰写 | 文汇章 | 全部黑板产物 + 验证结论 | **analysis-report.md** | G4 通过 |
 
 ### 2.2 各角色详细定义
@@ -61,7 +61,7 @@
 
 - **定位**：花最少的 token 拿到全局图，产出分块方案。
 - **输入**：仓库根路径（绝对路径）
-- **输出**：`manifest.json` —— 语言统计、入口文件、构建/工程文件清单、目录树摘要、**分块方案（6~20 块，每块 ≤5k LOC / ≤150 文件）**
+- **输出**：`manifest.json` —— 语言统计、入口文件、构建/工程文件清单、目录树摘要、**分块方案（按规模分块，至少 1 块，每块 ≤5k LOC / ≤150 文件）**
 - **自决（L1）**：分块边界（先目录、后依赖聚类，最小化跨块边）、块编号、尺寸超限的切分与合并
 - **协商（L2）**：无
 - **升级（L3）**：仓库为空 / 无法读取 / 明显混淆
@@ -71,7 +71,7 @@
 
 - **定位**：深读单个分块，把代码变成结构化模块卡片。
 - **输入**：本块文件闭集 + 邻块接口契约 + 全局 manifest 摘要
-- **输出**：`chunks/<id>.json`（模块卡片、块内依赖边、发现）+ `interfaces/<模块名>.md`（对外契约摘要，≤50 行）
+- **输出**：`chunks/<id>.json`（模块卡片、块内依赖边、发现）+ `interfaces/<chunk_id>/<模块名>.md`（对外契约摘要，≤50 行）
 - **自决（L1）**：模块识别粒度、命名（遵循仓库已有命名）、模式识别、发现分级
 - **协商（L2）**：发现分块错误（文件归属混乱/块超限）→ 退回 A1（经 C0）
 - **升级（L3）**：块内发现明显安全后门/恶意代码迹象
@@ -111,7 +111,7 @@
 
 - **定位**：独立复核关键结论。**只查证，不产出新结论。**
 - **输入**：高价值结论样本（高严重度发现、架构判定、入口判定、循环依赖判定）
-- **输出**：`verification/verdicts.json`（每条 claim → confirmed / refuted + 复查笔记）
+- **输出**：`verification/verdicts.json`（每条 claim → confirmed / refuted / unverified + 复查笔记）
 - **自决（L1）**：抽样范围、复查方法（读码/跑只读命令）
 - **协商（L2）**：refuted 结论 → 退回原产出角色（携带驳回理由与证据）
 - **升级（L3）**：无
@@ -133,15 +133,15 @@
 
 ### 3.1 制品黑板
 
-黑板位于**当前工作区**（不污染目标仓库），按目标仓库分目录：
+黑板位于显式指定的 `output_root/run_id/`，必须在目标仓库和插件安装目录之外。每次使用新 run_id，解析真实路径检查符号链接，并排他创建运行目录；发现重名就停止，禁止覆盖。DWF 当前通过宿主代理执行预检，不能把模型回报视为文件系统沙箱。
 
 ```
-analysis/<repo名>/
+<output_root>/<run_id>/
 ├── manifest.json            # A1 产出：全局图 + 分块方案
 ├── chunks/
 │   └── chunk-XX.json        # A2 产出：每块的模块卡片/边/发现
 ├── interfaces/
-│   └── <模块名>.md           # A2 产出：对外契约摘要（≤50 行）
+│   └── <chunk_id>/<模块名>.md           # A2 产出：对外契约摘要（≤50 行）
 ├── graph/
 │   ├── internal-deps.csv    # A4 产出：内部依赖边 u,v,kind,source
 │   └── external-deps.csv    # A4 产出：外部依赖 name,version,purpose,license
@@ -195,7 +195,7 @@ analysis/<repo名>/
 | 架构模式判定 · 分层 | L2 | L2 | **L1** | L2 | L2 | L2 | L2 |
 | 耦合度量口径 · 热点阈值 | L2 | L2 | L2 | **L1** | L2 | L2 | L2 |
 | 构建阶段划分 · 是否执行构建 | L2 | L2 | L2 | L2 | **L1**（执行须 C0 批） | L2 | L2 |
-| 抽样范围 · 结论 confirmed/refuted | L2 | L2 | L2 | L2 | L2 | **L1** | L2 |
+| 抽样范围 · 结论 confirmed/refuted/unverified | L2 | L2 | L2 | L2 | L2 | **L1** | L2 |
 | 排版 · 详略取舍 | L2 | L2 | L2 | L2 | L2 | L2 | **L1** |
 | 发现上游制品缺陷 → 退回 | L2 | L2 | L2 | L2 | L2 | L2 | L2 |
 | 仓库不可读 · 混淆 · 范围超预算 | **L3** | L3 | L2 | L2 | L2 | L2 | L2 |
@@ -230,40 +230,40 @@ analysis/<repo名>/
   ↓
 [A3 架构] ∥ [A4 依赖] ∥ [A5 构建]   ──专项制品──→ ⛩ G3 专项闭合（架构引用的模块都存在；依赖边可归位；构建覆盖全部构建入口）
   ↓
-[A6 交叉验证] ──verdicts──→ ⛩ G4 验证完成（抽样结论全部有 verdict；refuted 已回流或标注）
+[A6 交叉验证] ──verdicts──→ ⛩ G4 验证状态闭合（全部送验结论有 verdict；refuted 保留，unverified 明示）
   ↓
 [A7 报告撰写] ──analysis-report.md──→ ⛩ G5 报告合格（章节完整；结论带证据；覆盖声明如实）
   ↓
 交付总结（C0）
 ```
 
-**闸门判定标准（可机械判定）**：
+**闸门目标**（当前 DWF 对第 6 节的返回字段做机械检查；文件内容及证据真实性仍需宿主核对）：
 
 | 闸门 | 判定条件 | 不通过时 |
 |------|---------|---------|
-| G1 勘察闭合 | manifest.chunks 的文件并集 = 源文件全集；每块 ≤5k LOC/≤150 文件；6~20 块 | 打回 A1 调整分块 |
+| G1 勘察闭合 | manifest.chunks 的文件并集 = 源文件全集；每块 ≤5k LOC/≤150 文件；按规模分块，不截断 | 打回 A1 调整分块 |
 | G2 块结果合格 | 每 chunk JSON 字段齐全；findings 均有 evidence；interfaces/ 有对应契约 | 打回对应 A2 实例（≤2 轮） |
 | G3 专项闭合 | 架构引用模块 ∈ 模块全集；依赖边两端可归位；构建文件全覆盖 | 按回流通道 2/3/4 退回 |
-| G4 验证完成 | 高严重度结论 + 架构判定 + 入口判定 100% 有 verdict | 补派验证 |
+| G4 验证完成 | 高严重度结论 + 专项判定 + 入口判定 100% 有独立 verdict；无法复查单列 unverified | 补派验证 |
 | G5 报告合格 | 报告含全部必备章节；每条结论有证据；未覆盖区显式声明 | 打回 A7 |
 
 ### 5.3 快速通道
 
 ```
-用户目标 → C0 自行普查（glob + 读入口）→ 单个 A2 全读 → A7 组装 → 交付
+用户目标 → A1 轻量普查 → 单个 A2 全读 → A6 验证关键结论 → A7 组装 → 交付
 ```
 
 适用：脚本、单页应用、小型 CLI。跳过分块与专项角色，但**证据规则与报告结构不简化**。
 
 ### 5.4 单维通道
 
-`/analyze-team D:\repo 只要依赖关系` → A1（轻）→ A4 → A7（仅依赖章节）。其余章节标注"本次未覆盖"。
+`/swarm-analyze D:\repo 只要依赖关系` → A1（轻）→ A4 → A7（仅依赖章节）。其余章节标注"本次未覆盖"。
 
 ### 5.5 增量复析
 
-1. 读取既有黑板 `analysis/<repo>/`
-2. `git.changedFiles(base)` 圈出变更文件
-3. 映射到受影响块 → 只重派这些块（块名不变 → 工作流模式下缓存命中，零成本）
+1. 读取指定旧 run_id 的黑板，新结果写入全新 run_id。
+2. 用真实只读 Git 差异（含未提交/未跟踪状态）圈出变更文件，不依赖未验证的宿主 API。
+3. 映射到受影响块；仅在目标真实路径、文件内容指纹、角色/契约版本和依赖均匹配时复用旧制品。当前 DWF 实现全量重跑，尚无可信增量缓存。
 4. 重跑 A3~A7（合并阶段必须全量重算）
 
 ### 5.6 并发机会
@@ -278,78 +278,77 @@ analysis/<repo名>/
 
 ### 6.1 manifest.json（A1）
 
+所有落盘 JSON 和 DWF 返回 JSON 统一使用 snake_case；不能省略覆盖字段。
+
 ```yaml
 meta: { target, generated_at, tool: A1 }
+scan_status: complete|empty|unreadable|partial
+scan_evidence: "真实枚举工具/命令及结果摘要"
+source_files: [本次范围内全部源文件绝对路径]
+excluded: [{ path, reason }]
 languages: { <语言>: <文件数> }
 loc_total: int
-entry_points: [{ path, why }]                    # why: main/package.json bin/…
-build_files: [{ path, kind }]                    # kind: makefile/cmake/webpack/ci/docker/…
-tree_summary: string                             # 顶层目录一句话注释
-chunks:
-  - { id, files: [绝对路径], loc_est, neighbors: [块id], rationale }
+entry_points: [{ path, why, evidence }]
+build_files: [{ path, kind }]
+tree_summary: string
+chunks: [{ id, files: [绝对路径], loc_est, neighbors: [块id], rationale }]
 ```
+
+G1 检查 scan_status=complete、源文件非空、路径及块 ID 无重复、文件闭集与 source_files 严格相等、块尺寸达标。empty/unreadable/partial 均停止，不宣称“已确认空仓库”。source_files 的真实性仍依赖实际扫描证据。
 
 ### 6.2 chunks/chunk-XX.json（A2）
 
 ```yaml
-meta: { chunk_id, author: A2实例 }
+meta: { chunk_id, author: "A2:实例" }
 modules:
-  - { name, responsibility, entry_files: [path],
-      public_interfaces: [签名摘要], depends_on: [模块名],
-      patterns: [观察到的模式] }
-edges: [ { from, to, kind: import|call|config } ]
+  - { name, responsibility, entry_files: [path], public_interfaces: [签名摘要],
+      depends_on: [模块名], patterns: [...], contract_path: 绝对路径 }
+edges: [{ from, to, kind: import|call|config, source: "path:line" }]
 findings:
-  - { where: "path:line", what, evidence, severity: low|medium|high, confidence: 0~1 }
-coverage: { files_claimed: int, files_analyzed: int }   # 不等即缺口
+  - { id: "chunk-id:序号", where: "path:line", what, evidence,
+      severity: low|medium|high, confidence: 0~1 }
+coverage: { files_claimed: int, files_analyzed: int, analyzed_files: [完整深读路径], gaps: [原因] }
 ```
 
-### 6.3 interfaces/<模块名>.md（A2）
+G2 核对计数与逐文件名单，重复、遗漏、抽样阅读和 gaps 均不放行。模块名必须跨块唯一，依赖端点必须属于模块全集，每条边有来源。
 
-≤50 行：模块一句话职责 + 导出签名清单 + 依赖声明 + 一条典型用法。
+### 6.3 interfaces/<chunk_id>/<模块名>.md（A2）
 
-### 6.4 specialty/architecture.md（A3）
+≤50 行：职责、导出签名、依赖、典型用法。按块划分命名空间防止并行覆盖，contract_path 必须位于本块目录。并行首次深读不依赖尚未冻结的邻块产物；需要补读时由 C0 调度新一轮，不能用竞态决定输入。
 
-```yaml
-meta: { author: A3, based_on: [chunk ids] }
-pattern: { name, rationale, evidence_refs: [模块卡片] }
-layers: [{ name, modules: [模块名], rule: 分层规则 }]
-mermaid: string
-flows: [{ name, steps: [跨模块逐跳描述] }]
-consistency: { score, issues: [...] }
-```
+### 6.4–6.6 专项文档（A3/A4/A5）
 
-### 6.5 specialty/dependency.md + graph/*.csv（A4）
-
-```yaml
-internal: { hotspots: [{module, fan_in, fan_out}], cycles: [[模块名, …]] }
-external: [ { name, version, purpose, license, outdated: bool, vuln: null|CVE编号} ]
-notes: [...]
-```
-
-CSV：`internal-deps.csv` 列 `from,to,kind,source(path:line)`；`external-deps.csv` 列 `name,version,purpose,license`。
-
-### 6.6 specialty/build.md（A5）
-
-```yaml
-toolchain: [{ tool, version, how_detected }]
-stages: [{ name, input, output, triggered_by }]      # 有序
-environments: { dev: [...], ci: [...], prod: [...] }
-artifacts: [{ path_pattern, produced_by }]
-codegen_steps: [...]                                   # 生成代码的步骤（分析时易漏）
-reproducibility: { verdict, blockers: [...] }
-executed: false                                        # 实际执行构建时才为 true，须 C0 批准
-```
+各角色提示词保留架构、依赖、构建的领域结构。构建默认 `executed: false`；未执行构建不等于构建通过。依赖版本/漏洞状态无法查实时标记未知，不能从版本老旧推导 CVE 已确认。
 
 ### 6.7 verification/verdicts.json（A6）
 
+落盘和返回统一为对象：
+
 ```yaml
-- { claim, source_role, verdict: confirmed|refuted,
-    note: 复查方法与证据, own_evidence: "path:line" }
+verdicts:
+  - { claim_id, verdict: confirmed|refuted|unverified,
+      note: "独立复查方法或无法复查的原因", own_evidence: "自己的 file:line 或工具输出" }
 ```
+
+每个送验 ID 恰好对应一次 verdict，不截取前 N 条。confirmed/refuted 都需要独立证据；证据不足属于 unverified。refuted 保留原始记录与反证，不能改成未验证而丢失判定。
 
 ### 6.8 report/analysis-report.md（A7）
 
-见第 7 节。
+按第 7 节组织报告。DWF 返回 `{path, summary, sections: [0,1,2,3,4,5,6,7,8], claim_ids: [全部送验ID]}`。运行时检查声明和发布路径；对落盘正文的独立核对仍需真实宿主验收，不将结构检查等同于事实验证。
+
+### 6.9 专项共同返回摘要（A3/A4/A5）
+
+```yaml
+summary: string
+details: [string]
+findings: [与 6.2 相同，id 使用角色前缀]
+claims: [{ id: "A3/A4/A5:序号", claim, source_role, evidence_refs: [非空证据引用] }]
+module_refs: [文中引用的模块名]
+build_files_covered: [本专项实际检查的构建文件绝对路径]
+not_covered: [未完成维度及原因]
+```
+
+G3 检查引用存在、架构判定进入送验、A5 构建文件覆盖闭合。G4 自动加入全部入口判定、全部高严重度发现和全部专项 claims，无数量截断。存在 unverified 或专项缺口则本次状态为 partial。
 
 ---
 
@@ -390,56 +389,32 @@ executed: false                                        # 实际执行构建时�
 
 1. **两阶段扫描**：第一阶段 A1 用脚本化手段（目录遍历、文件统计、git 元数据、导入语句抽样）拿全局图——近零 token；第二阶段 A2 才花预算深读。
 2. **契约蒸馏**：每块完成后产出 ≤50 行接口契约；后续块的输入 = 本块全文 + **邻块**契约 + manifest 摘要，绝不携带全库。
-3. **金字塔汇总**：块结果 → 合并模块清单 → 专项模型。A3/A4/A5 永不接触原始代码。
+3. **金字塔汇总**：块结果 → 合并模块清单 → 专项模型。A3 不接触原始代码；A4/A5 可定点读取依赖清单、锁文件与构建配置。
 4. **闭集派发**：A2 收到的文件清单是闭集，禁止漫游；需要邻块细节按契约路径定点补读。
-5. **黑板即缓存**：中断/复析时已完成的块直接复用；工作流模式下块名不变 → Amend 缓存命中。
+5. **黑板保留证据**：不凭块名复用结果；当前 DWF 全量重跑并使用新 run_id，增量缓存留待内容指纹与依赖失效机制实现。
 6. **尺寸红线**：块超限 → A1 对半切（沿内部目录或依赖簇）；<300 LOC 的小块与近邻合并。
 
 ---
 
-## 10. ZCode 落地（文件清单与用法）
+## 10. ZCode 落地与兼容性边界
 
 ```
-.analysis-team/
-├── DESIGN.md                       # 本文档
-├── agents/
-│   ├── a1-scout.md                 # 罗经纬 · 勘察测绘
-│   ├── a2-module-analyst.md        # 郝拆解 · 模块深读
-│   ├── a3-architect.md             # 高屋建 · 架构分析
-│   ├── a4-dependency.md            # 纲举目 · 依赖分析
-│   ├── a5-build.md                 # 步就班 · 构建流程
-│   ├── a6-verifier.md              # 铁证如 · 交叉验证
-│   └── a7-reporter.md              # 文汇章 · 报告撰写
-└── workflow/
-    └── code-analysis.dwf.ts        # 动态工作流脚本（大库通道）
-
-.agents/commands/my-team.md         # /my-team 斜杠命令（C0 操作手册）
+code-analysis-swarm/
+├── .zcode-plugin/plugin.json
+├── DESIGN.md
+├── agents/                  # 七个带 name/description 的角色
+├── command/swarm-analyze.md       # /swarm-analyze 入口
+└── workflow/code-analysis.dwf.ts
 ```
 
-**两条执行路径**：
+`plugin.json` 注册 command 与 agents 组件，格式依据 [ZCode 官方插件文档](https://zcode.z.ai/cn/docs/plugin)。命令运行前确定插件安装目录 team_root；只有宿主实际解析安装路径时才使用 `${ZCODE_PLUGIN_ROOT}`，命令正文不能假定该变量会插值。无法取得安装路径时要求明确目录，禁止硬编码某台机器路径。
 
-| 路径 | 入口 | 适用 | 特点 |
-|------|------|------|------|
-| A. 斜杠命令 | `/my-team <仓库路径> [意图]` | 小/中库 | 主会话当 C0，用 Agent 工具派发，零确认开销 |
-| B. 动态工作流 | 已注册为全局工作流 `code-analysis-swarm`（参数 target = 仓库绝对路径） | 大库 | 类型化结果、阶段图审批、断点恢复、进度看板 |
+DWF 为可选执行路径，参数为 target、team_root、output_root、run_id，均显式传入。工作流文件不会因为插件安装而自动全局注册；本仓库不宣称已经在当前 ZCode 环境注册或验证。没有 DWF 时依命令执行手动 SOP，并保持相同制品和门禁。
 
-两条路径共用同一套角色提示词与黑板布局，可互相切换。角色提示词以绝对路径引用，工作流在任意工作区运行都能找到同一套角色定义。
+所有读取、写入、排他创建与真实路径解析由宿主执行；当前本地测试通过 mock 验证分派与结构拒绝逻辑，不等同于真实宿主集成或沙箱。未知参数、读取失败、缺少证据、重复结果和覆盖不闭合均返回 blocked，并保留本次已有黑板。
 
-### 10.1 跨窗口 / 跨工作区使用
+## 11. 与 Dev Companion 的边界
 
-| 场景 | 用法 |
-|------|------|
-| **任何 ZCode 窗口（任意文件夹）** | 对话里说：「运行已保存的工作流 `code-analysis-swarm`，target 是 `D:\xxx`」。全局注册不挑工作区；报告与黑板落在**当前窗口的工作区** `analysis/<repo名>/` 下 |
-| 本默认工作区的窗口 | 直接 `/my-team D:\xxx`（斜杠命令原生加载）；也可用上面的工作流方式 |
-| 其他文件夹也想要斜杠命令 | 把 `.analysis-team/` 文件夹与 `.agents/commands/my-team.md` 复制到那个项目根目录 |
-| 任何窗口、不用工作流 | 对话说：「按 `C:\Users\G\.zcode\workspace\default\.analysis-team\DESIGN.md` 的体系作为 C0，分析 `D:\xxx`」——体系与角色提示词都在磁盘上，任何会话读了就能照跑 |
+本团队持续保持只读分析职责，不承担实现、发布或开发完成度验收。Dev Companion 可把其报告作为“已有项目分析”的证据输入；`complete` 仅表示本次分析结构闭合，不代表产品需求完成、测试通过或软件可上线。
 
----
-
-## 11. 已确认决策（2026-09-19）
-
-1. **典型规模：万行级** —— 默认参数即为此调优（6~20 块 × ≤5k LOC/块；万行仓库通常落在 3~6 块）。
-2. **不设独立安全角色 A8** —— 安全作为 A2/A4 的发现类别 + L3 升级红线。
-3. **报告语言：中文**（代码引用、标识符保持原文）。
-4. **工作流已注册为全局**：名 `code-analysis-swarm`，任意 ZCode 窗口可按名运行。
-5. **构建默认静态分析**（`executed: false`）；需要真实执行构建时单独授权，在副本目录进行。
+不自动写 `.toh/memory` 或任何全局记忆。只有用户明确要求时才在其指定位置保存额外记忆；运行记录已在独立黑板中保留。

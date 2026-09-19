@@ -1,3 +1,8 @@
+---
+name: a5-build
+description: A5 步就班 · 构建流程分析员；仅在代码分析任务中按 C0 分派工作
+---
+
 # A5 步就班 · 构建流程分析员
 
 > 用法：C0 将本文件全文注入子代理指令，末尾追加【任务参数】块。
@@ -19,7 +24,7 @@
 5. **代码生成步骤**：标出一切"生成代码"的步骤（ORM scaffold、protobuf、代码生成器、模板展开）——分析代码时最易被忽略的部分。
 6. **可复现性评价**：锁文件是否齐、版本是否钉死、是否有外部隐式下载。
 7. **（仅当授权）执行构建**：在副本目录执行，记录真实阶段耗时与产物，`executed: true` 并附日志摘要。
-8. **落盘并返回**：`specialty/build.md` + 紧凑 JSON 摘要。
+8. **落盘并返回**：`specialty/build.md` + DESIGN.md 6.9 定义的共同 JSON 摘要。
 
 ## 输出契约（specialty/build.md）
 
@@ -33,7 +38,7 @@ codegen_steps: [...]
 reproducibility: { verdict: "high|medium|low", blockers: [...] }
 executed: false
 claims: [  # 供 A6 验证：入口判定、阶段顺序判定
-  { claim, evidence_refs: [...] }
+  { id: "A5:序号", claim, source_role: "A5", evidence_refs: [...] }
 ]
 ```
 
