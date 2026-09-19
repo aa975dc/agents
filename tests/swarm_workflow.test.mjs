@@ -8,7 +8,7 @@ import { stripTypeScriptTypes } from 'node:module';
 const root = new URL('../code-analysis-swarm/', import.meta.url);
 const source = readFileSync(new URL('workflow/code-analysis.dwf.ts', root), 'utf8');
 const compiled = stripTypeScriptTypes(`async function workflow() {\n${source}\n}`);
-const execute = new Function('args', 'agent', 'artifact', 'phase', 'report', 'log', `${compiled}\nreturn workflow();`);
+const execute = new Function('args', 'agent', 'artifact', 'phase', 'report', 'log', 'world', `${compiled}\nreturn workflow();`);
 
 async function run(options = {}) {
   const args = { target: '/repos/app', team_root: '/plugins/analysis', output_root: '/reports', run_id: 'run-001', ...options.args };
@@ -21,15 +21,47 @@ async function run(options = {}) {
     build_files: [{ path: `${args.target}/package.json`, kind: 'npm' }], tree_summary: 'fixture',
     chunks: files.map((file, i) => ({ id: `chunk-${i}`, files: [file], loc_est: 10, neighbors: [], rationale: 'fixture' })),
   };
-  const calls = [], cards = [], publications = [];
+  const calls = [], cards = [], publications = [], worldCalls = [];
   let claims = [];
+  // world.run 桩：伪造真实宿主返回结构 {exitCode, stdout, stderr}。
+  // 首参恒为字面量 "python3"，子命令与 JSON 输入在 args 数组里（无 shell 拼接）。
+  const state = { planExit: 0, acquireExit: 0, acquireStdout: null, verifyExit: 0, reportExit: 0, mutateAcquire: null, mutateInspect: null };
+  options.world?.(state);
+  const worldRoots = payload => ({
+    source_root: { input: payload.source_root, realpath: payload.source_root, lstat_kind: 'directory' },
+    team_root: { realpath: payload.team_root },
+    host_workspace_root: { realpath: '/workspace' },
+    run_root: { realpath: `${payload.run_root_parent ?? '/workspace/.code-analysis-swarm-runs'}/${payload.run_id ?? 'run-001'}`, publish_relpath: null },
+  });
+  const world = { run: async (cmd, argv) => {
+    worldCalls.push([cmd, argv]);
+    if (cmd !== 'python3') throw new Error(`Unexpected command ${cmd}`);
+    const payload = JSON.parse(argv[3]);
+    if (argv[1] === 'plan') {
+      if (state.planExit) return { exitCode: state.planExit, stdout: '', stderr: 'mock plan failure' };
+      const roots = worldRoots(payload); state.mutatePlan?.(roots);
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, run_id: payload.run_id ?? 'run-001', run_root_exists: false, roots, checks: {} }), stderr: '' };
+    }
+    if (argv[1] === 'acquire') {
+      if (state.acquireExit) return { exitCode: state.acquireExit, stdout: '', stderr: 'mock acquire conflict' };
+      if (state.acquireStdout !== null) return { exitCode: 0, stdout: state.acquireStdout, stderr: '' };
+      const roots = worldRoots(payload); state.mutateAcquire?.(roots);
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, run_id: payload.run_id, created_at: '2026-09-20T00:00:00+00:00', mode: 'mkdir_exclusive', roots }), stderr: '' };
+    }
+    if (argv[1] === 'verify') {
+      if (state.verifyExit) return { exitCode: state.verifyExit, stdout: '', stderr: 'mock verify failure' };
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true }), stderr: '' };
+    }
+    if (argv[1] === 'read-report') {
+      if (state.reportExit) return { exitCode: state.reportExit, stdout: '', stderr: 'mock read failure' };
+      const inspect = { ok: true, path: payload.path, realpath: payload.path, size: 42, sha256: 'a'.repeat(64), body: '# Fixture analysis report\n', publish_relpath: `reports/${args.run_id}/report/analysis-report.md` };
+      state.mutateInspect?.(inspect);
+      return { exitCode: 0, stdout: JSON.stringify(inspect), stderr: '' };
+    }
+    throw new Error(`Unexpected world.run subcommand ${argv[1]}`);
+  } };
   const agent = name => ({ ask: async prompt => {
     calls.push({ name, prompt });
-    if (name === '路径预检员·罗经纬') {
-      const p = { target_status: 'readable', target_realpath: args.target, output_realpath: args.output_root,
-        team_realpath: args.team_root, board_created_exclusive: true, evidence: 'mock realpath and mkdir-excl output' };
-      options.preflight?.(p); return p;
-    }
     if (name === '勘察员·罗经纬') { options.map?.(map); return map; }
     if (name.startsWith('模块深读员·')) {
       const id = name.split('·')[1], chunk = map.chunks.find(c => c.id === id);
@@ -60,9 +92,9 @@ async function run(options = {}) {
     }
     throw new Error(`Unexpected agent ${name}`);
   } });
-  const artifact = { board() {}, async file(...args) { if (options.publishFailure) throw new Error('artifact missing'); publications.push(args); } };
-  const result = await execute(args, agent, artifact, () => {}, card => cards.push(card), () => {});
-  return { result, calls, cards, publications, claims };
+  const artifact = { board() {}, async markdown(...args) { publications.push(['markdown', ...args]); }, async file(...args) { if (options.publishFailure) throw new Error('artifact missing'); publications.push(['file', ...args]); } };
+  const result = await execute(args, agent, artifact, () => {}, card => cards.push(card), () => {}, world);
+  return { result, calls, cards, publications, claims, worldCalls };
 }
 
 test('full workflow uses snake_case artifacts and preserves >24 chunks / >20 claims', async () => {
@@ -84,9 +116,9 @@ test('portable explicit team root reaches all seven role prompts', async () => {
   assert(!source.includes('C:/Users/G'));
 });
 
-test('output inside target is rejected before any agent can write', async () => {
-  const { result, calls } = await run({ args: { output_root: '/repos/app/reports' } });
-  assert.equal(result.status, 'blocked'); assert.equal(calls.length, 0);
+test('output inside target is rejected before any agent or helper run', async () => {
+  const { result, calls, worldCalls } = await run({ args: { output_root: '/repos/app/reports' } });
+  assert.equal(result.status, 'blocked'); assert.equal(calls.length, 0); assert.equal(worldCalls.length, 0);
 });
 
 test('duplicate separators cannot bypass lexical containment', async () => {
@@ -99,14 +131,16 @@ test('Windows paths compare case-insensitively for output containment', async ()
   assert.equal(result.status, 'blocked'); assert.equal(calls.length, 0);
 });
 
-for (const [name, preflight] of [
-  ['existing run directory', p => p.board_created_exclusive = false],
-  ['symlink into target', p => p.output_realpath = '/repos/app/linked'],
-  ['no evidence', p => p.evidence = ''],
-  ['unreadable target', p => p.target_status = 'unreadable'],
-]) test(`preflight rejects ${name}`, async () => {
-  const { result, calls } = await run({ preflight });
-  assert.equal(result.status, 'blocked'); assert.equal(calls.length, 1);
+// 预检已改为 world.run 调 scripts/precheck.py 的确定性回执；失败时无任何分析代理被调用。
+for (const [name, setup] of [
+  ['unreadable target', w => { w.planExit = 2; }],
+  ['existing run directory', w => { w.acquireExit = 3; }],
+  ['acquire receipt realpath inside target', w => { w.mutateAcquire = r => { r.run_root.realpath = '/repos/app/linked'; }; }],
+  ['corrupt receipt', w => { w.acquireStdout = 'not json'; }],
+  ['incomplete receipt', w => { w.acquireStdout = JSON.stringify({ ok: true, run_id: 'run-001', roots: { run_root: { realpath: '/reports/run-001' }, team_root: { realpath: '/plugins/analysis' } } }); }],
+]) test(`helper preflight rejects ${name}`, async () => {
+  const { result, calls } = await run({ world: setup });
+  assert.equal(result.status, 'blocked'); assert.equal(calls.length, 0);
 });
 
 for (const [name, map] of [
@@ -121,7 +155,9 @@ for (const [name, map] of [
   ['unknown neighbor', m => m.chunks[0].neighbors = ['chunk-missing']],
 ]) test(`G1 blocks ${name} without a completed analysis claim`, async () => {
   const { result, calls } = await run({ map });
-  assert.equal(result.status, 'blocked'); assert.equal(result.verified.length, 0);
+  // 预检成功会留下一条 checked 记录；G1 失败时不得再有任何分析声明。
+  assert.equal(result.status, 'blocked'); assert.equal(result.verified.length, 1);
+  assert(result.verified[0].startsWith('路径预检'));
   assert(!calls.some(c => c.name.startsWith('模块深读员·')));
 });
 
