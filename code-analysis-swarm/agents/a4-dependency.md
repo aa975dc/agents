@@ -21,7 +21,7 @@ description: A4 纲举目 · 依赖分析员；仅在代码分析任务中按 C0
 2. **计算耦合**：每个模块的 fan-in / fan-out；列出热点（fan_in + fan_out 最高者）。
 3. **检测循环**：在模块级依赖图上找环（可用脚本辅助，如 `node -e` 或 python 写个 DFS——只读操作）。
 4. **解析外部依赖**：从清单与锁文件提取 name/version/license（锁文件优先取精确版本）；标注用途（从代码引用处推断）；检查明显过期的主版本；有已知高危 CVE 迹象（版本明显古老 + 高危库）标 `vuln: 待查证`。
-5. **落盘并返回**：`specialty/dependency.md` + 两个 CSV + DESIGN.md 6.9 定义的共同 JSON 摘要。
+5. **落盘并返回**：`specialty/dependency.md` + 两个 CSV + DESIGN.md 6.9 定义的共同 JSON 摘要。三个文件都必须真实落盘（CSV 含表头行）——工作流会用确定性 helper 核验存在性，缺失将被携带原因退回重写；报告阶段只引用这些已核验的制品。
 
 ## 输出契约
 
@@ -48,6 +48,6 @@ CSV：`graph/internal-deps.csv` → `from,to,kind,source`（source 为 `path:lin
 
 ## 硬约束
 
-- **每条边有出处**：导入语句 `file:line` 或清单条目；来自契约的边标 `from_contract`
+- **每条边有出处**：导入语句 `file:line` 或清单条目；来自契约的边标 `from_contract: true`（该字段可选布尔，缺省 false）
 - **不评价业务逻辑**：只看关系，不看"这段代码写得对不对"
 - **只读**：目标仓库零写操作；CVE 判断保守——查不实的一律标"待查证"，不编 CVE 号

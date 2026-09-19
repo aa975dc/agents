@@ -43,7 +43,7 @@
 | **A4** | 依赖分析 | 纲举目 | manifest + 各块依赖边 + 包清单 | **dependency 报告 + 依赖边表 CSV** | G2 通过 |
 | **A5** | 构建流程 | 步就班 | 构建文件 + CI 配置 | **build.md**（管线阶段/工具链/产物/环境） | G2 通过 |
 | **A6** | 交叉验证 | 铁证如 | 高价值结论样本 | **verdicts**（confirmed / refuted / unverified） | G3 通过 |
-| **A7** | 报告撰写 | 文汇章 | 全部黑板产物 + 验证结论 | **analysis-report.md** | G4 通过 |
+| **A7** | 报告撰写 | 文汇章 | 经核验存在的黑板制品清单 + 验证结论 + 覆盖统计 | **analysis-report.md** | G4 通过 |
 
 ### 2.2 各角色详细定义
 
@@ -133,7 +133,7 @@
 
 ### 3.1 制品黑板
 
-黑板位于显式指定的 `output_root/run_id/`，必须在目标仓库和插件安装目录之外。每次使用新 run_id，解析真实路径检查符号链接，并排他创建运行目录；发现重名就停止，禁止覆盖。DWF 当前通过宿主代理执行预检，不能把模型回报视为文件系统沙箱。
+黑板位于 `output_root/run_id/`（两个参数均可选：缺省时 helper 在宿主 workspace 下生成 `.code-analysis-swarm-runs/<随机 run_id>`），必须在目标仓库和插件安装目录之外。每次使用新 run_id，解析真实路径检查符号链接，并排他创建运行目录；发现重名就停止，禁止覆盖。预检与制品/报告核验由 `scripts/precheck.py`（plan/acquire/verify/check-files/read-report）经 world.run 固定 argv 确定性执行，不把模型回报视为文件系统沙箱。
 
 ```
 <output_root>/<run_id>/
@@ -241,11 +241,13 @@
 
 | 闸门 | 判定条件 | 不通过时 |
 |------|---------|---------|
-| G1 勘察闭合 | manifest.chunks 的文件并集 = 源文件全集；每块 ≤5k LOC/≤150 文件；按规模分块，不截断 | 打回 A1 调整分块 |
-| G2 块结果合格 | 每 chunk JSON 字段齐全；findings 均有 evidence；interfaces/ 有对应契约 | 打回对应 A2 实例（≤2 轮） |
-| G3 专项闭合 | 架构引用模块 ∈ 模块全集；依赖边两端可归位；构建文件全覆盖 | 按回流通道 2/3/4 退回 |
-| G4 验证完成 | 高严重度结论 + 专项判定 + 入口判定 100% 有独立 verdict；无法复查单列 unverified | 补派验证 |
-| G5 报告合格 | 报告含全部必备章节；每条结论有证据；未覆盖区显式声明 | 打回 A7 |
+| G1 勘察闭合 | manifest.chunks 的文件并集 = 源文件全集；每块 ≤5k LOC/≤150 文件；按规模分块，不截断 | blocked（A1 勘察完整性问题不回流） |
+| G2 块结果合格 | 每 chunk JSON 字段齐全（含 from_contract 可选布尔，缺省 false）；findings 均有 evidence；interfaces/ 有对应契约且经 helper 核验真实存在 | 携带具体失败原因重问同一 A2 实例（初次+2 次修复尝试）；路径越界或同错复发直接 blocked |
+| G3 专项闭合 | 架构引用模块 ∈ 模块全集；依赖边两端可归位；构建文件全覆盖；specialty/*.md 与 graph/*.csv 经核验真实落盘 | 按回流通道 2/3/4 携带原因退回（≤2 次修复尝试） |
+| G4 验证完成 | 高严重度结论 + 专项判定 + 入口判定 100% 有独立 verdict；无法复查单列 unverified；verdicts.json 落盘 | 携带原因重问 A6（≤2 次）；仍失败 blocked |
+| G5 报告合格 | 报告含全部必备章节；每条结论有证据；未覆盖区显式声明；只引用已核验存在的制品 | 打回 A7（≤2 次修复尝试） |
+
+**有限回流纪律（DWF 已实现）**：可修复类失败（schema 字段缺失/格式、覆盖缺项、模块名/边端点不闭合、声明制品未落盘）按代理实例记账，最多"初次 + 2 次修复尝试"，每次携带具体失败原因重问同一实例（agent 名稳定，上下文续接）；硬阻断类（路径逃逸、权限、未知副作用、与上一次完全相同的失败复发）立即 blocked。**blocked 不抹成果**：已完成 G4 的 confirmed findings/claims 保留在返回值（`claim_verdicts`），并发布"部分完成"报告（artifact `partial-report`），缺口清单显式列出。
 
 ### 5.3 快速通道
 
@@ -303,14 +305,14 @@ meta: { chunk_id, author: "A2:实例" }
 modules:
   - { name, responsibility, entry_files: [path], public_interfaces: [签名摘要],
       depends_on: [模块名], patterns: [...], contract_path: 绝对路径 }
-edges: [{ from, to, kind: import|call|config, source: "path:line" }]
+edges: [{ from, to, kind: import|call|config, from_contract: bool（可选，缺省 false）, source: "path:line" }]
 findings:
   - { id: "chunk-id:序号", where: "path:line", what, evidence,
       severity: low|medium|high, confidence: 0~1 }
 coverage: { files_claimed: int, files_analyzed: int, analyzed_files: [完整深读路径], gaps: [原因] }
 ```
 
-G2 核对计数与逐文件名单，重复、遗漏、抽样阅读和 gaps 均不放行。模块名必须跨块唯一，依赖端点必须属于模块全集，每条边有来源。
+G2 核对计数与逐文件名单，重复、遗漏、抽样阅读和 gaps 均不放行；`from_contract` 为可选布尔（缺省 false，来自邻块契约的跨块边标 true），类型不符按可修复回流处理。模块名必须跨块唯一，依赖端点必须属于模块全集，每条边有来源。chunk JSON 与 interfaces 契约文件经 helper 确定性核验真实落盘，缺失按可修复回流退回对应 A2 实例。
 
 ### 6.3 interfaces/<chunk_id>/<模块名>.md（A2）
 
@@ -334,7 +336,7 @@ verdicts:
 
 ### 6.8 report/analysis-report.md（A7）
 
-按第 7 节组织报告。DWF 返回 `{path, summary, sections: [0,1,2,3,4,5,6,7,8], claim_ids: [全部送验ID]}`。运行时检查声明和发布路径；对落盘正文的独立核对仍需真实宿主验收，不将结构检查等同于事实验证。
+按第 7 节组织报告。A7 的任务参数只提供经 helper 核验真实存在的黑板制品清单（manifest/chunks/interfaces/specialty/graph/verdicts），清单之外的文件不得作为报告素材。DWF 返回 `{path, summary, sections: [0,1,2,3,4,5,6,7,8], claim_ids: [全部送验ID]}`。运行时检查声明和发布路径；对落盘正文的独立核对仍需真实宿主验收，不将结构检查等同于事实验证。blocked 结局时若 G4 已完成，confirmed 结论以"部分完成"报告（partial-report）保留发布。
 
 ### 6.9 专项共同返回摘要（A3/A4/A5）
 
@@ -348,7 +350,7 @@ build_files_covered: [本专项实际检查的构建文件绝对路径]
 not_covered: [未完成维度及原因]
 ```
 
-G3 检查引用存在、架构判定进入送验、A5 构建文件覆盖闭合。G4 自动加入全部入口判定、全部高严重度发现和全部专项 claims，无数量截断。存在 unverified 或专项缺口则本次状态为 partial。
+G3 检查引用存在、架构判定进入送验、A5 构建文件覆盖闭合；专项 md 与依赖 CSV 声明产出后经 helper 核验真实落盘，缺失按可修复回流退回产出角色。G4 自动加入全部入口判定、全部高严重度发现和全部专项 claims（`source_role` 为角色名 A1/A2/A3/A4/A5，finding id 保留在 claim id 中），无数量截断。存在 unverified 或专项缺口则本次状态为 partial。
 
 ---
 
@@ -409,9 +411,9 @@ code-analysis-swarm/
 
 `plugin.json` 注册 command 与 agents 组件，格式依据 [ZCode 官方插件文档](https://zcode.z.ai/cn/docs/plugin)。命令运行前确定插件安装目录 team_root；只有宿主实际解析安装路径时才使用 `${ZCODE_PLUGIN_ROOT}`，命令正文不能假定该变量会插值。无法取得安装路径时要求明确目录，禁止硬编码某台机器路径。
 
-DWF 为可选执行路径，参数为 target、team_root、output_root、run_id，均显式传入。工作流文件不会因为插件安装而自动全局注册；本仓库不宣称已经在当前 ZCode 环境注册或验证。没有 DWF 时依命令执行手动 SOP，并保持相同制品和门禁。
+DWF 为可选执行路径，参数为 target、team_root（必传）与 output_root、run_id（可选，缺省由 helper 生成），返回值统一 snake_case（`gate_checks` 为结构闸门通过记录，≠事实已核verified；事实核验结果见 `findings[].status` 与 `claim_verdicts`）。工作流文件不会因为插件安装而自动全局注册；本仓库不宣称已经在当前 ZCode 环境注册或验证。没有 DWF 时依命令执行手动 SOP，并保持相同制品和门禁。
 
-所有读取、写入、排他创建与真实路径解析由宿主执行；当前本地测试通过 mock 验证分派与结构拒绝逻辑，不等同于真实宿主集成或沙箱。未知参数、读取失败、缺少证据、重复结果和覆盖不闭合均返回 blocked，并保留本次已有黑板。
+所有读取、写入、排他创建与真实路径解析由宿主执行；当前本地测试通过 mock 验证分派与结构拒绝逻辑，不等同于真实宿主集成或沙箱。未知参数、读取失败、缺少证据、重复结果和覆盖不闭合先走有限回流（初次+2 次修复尝试，携带具体原因重问同一实例）；仍失败、路径逃逸、权限问题或同错复发返回 blocked，并保留本次已有黑板与已 confirmed 的结论。
 
 ## 11. 与 Dev Companion 的边界
 

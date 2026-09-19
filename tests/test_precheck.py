@@ -250,6 +250,53 @@ class PrecheckTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("中文 正文", self.stdout_json(out)["body"])
 
+    def test_check_files_reports_existing_regular_files(self):
+        run_root = os.path.join(self.parent, "run-cf")
+        os.makedirs(os.path.join(run_root, "graph"))
+        csv_path = os.path.join(run_root, "graph", "internal-deps.csv")
+        with open(csv_path, "w", encoding="utf-8") as fh:
+            fh.write("from,to,kind,source\n")
+        code, out, _ = run_helper("check-files", {"within_root": run_root, "paths": [csv_path]})
+        self.assertEqual(code, 0)
+        data = self.stdout_json(out)
+        self.assertTrue(data["ok"])
+        self.assertEqual(len(data["files"]), 1)
+        self.assertEqual(data["files"][0]["kind"], "regular")
+        self.assertGreater(data["files"][0]["size"], 0)
+
+    def test_check_files_missing_empty_and_escape_exit_3_with_list(self):
+        run_root = os.path.join(self.parent, "run-cf2")
+        os.makedirs(run_root)
+        empty = os.path.join(run_root, "empty.csv")
+        open(empty, "w").close()
+        absent = os.path.join(run_root, "absent.md")
+        outside = os.path.join(self.source, "README.md")
+        with open(outside, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        code, out, _ = run_helper("check-files", {"within_root": run_root, "paths": [empty, absent, outside]})
+        self.assertEqual(code, 3)
+        data = self.stdout_json(out)
+        self.assertEqual(data["kind"], "conflict")
+        self.assertEqual(data["missing"], [empty, absent, outside])
+
+    def test_check_files_symlink_escape_counts_as_missing(self):
+        run_root = os.path.join(self.parent, "run-cf3")
+        os.makedirs(run_root)
+        outside = os.path.join(self.source, "victim.md")
+        with open(outside, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        link = os.path.join(run_root, "link.md")
+        os.symlink(outside, link)
+        code, out, _ = run_helper("check-files", {"within_root": run_root, "paths": [link]})
+        self.assertEqual(code, 3)
+        self.assertEqual(self.stdout_json(out)["missing"], [link])
+
+    def test_check_files_rejects_bad_paths_argument(self):
+        for paths in ([], "not-a-list", ["/repos/a b", 3]):
+            code, out, _ = run_helper("check-files", {"within_root": self.parent, "paths": paths})
+            self.assertEqual(code, 2, repr(paths))
+            self.assertEqual(self.stdout_json(out)["kind"], "argument")
+
 
 if __name__ == "__main__":
     unittest.main()

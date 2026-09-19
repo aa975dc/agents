@@ -13,6 +13,9 @@ stdout 恒为单行 JSON；错误输出只含路径与原因，不含密钥、�
               最后一级必须不存在），并写 run_root/precheck.json 回执。
   verify      校验 run_root 不含于 source_root、outputs 均在 run_root 内、
               敏感路径拒绝（复核用，不创建）。
+  check-files 校验一批路径真实存在：均须位于 within_root 内（realpath 后判定，
+              拒绝符号链接逃逸）、为普通文件且非空；全部合格 exit 0 并输出明细，
+              否则 exit 3，错误回执含 missing 数组（Z11 制品存在性核验）。
   read-report 校验报告文件真实存在（普通文件、位于 within_root 内、大小合规），
               输出 size/sha256/正文/publish_relpath。
 
@@ -60,8 +63,11 @@ def emit(payload):
     sys.exit(EXIT_OK)
 
 
-def fail(code, kind, message):
-    print(json.dumps({"ok": False, "kind": kind, "error": message}, ensure_ascii=False))
+def fail(code, kind, message, extra=None):
+    payload = {"ok": False, "kind": kind, "error": message}
+    if extra:
+        payload.update(extra)
+    print(json.dumps(payload, ensure_ascii=False))
     sys.exit(code)
 
 
@@ -288,10 +294,36 @@ def cmd_read_report(payload):
     })
 
 
+def cmd_check_files(payload):
+    within_root = os.path.realpath(require_string(payload, "within_root"))
+    paths = payload.get("paths")
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p.strip() for p in paths):
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, "paths 必须是非空字符串数组")
+    files, missing = [], []
+    for path in paths:
+        real = os.path.realpath(path)
+        inside = is_inside(real, within_root)
+        kind = lstat_kind(path) if inside else "outside_root"
+        size = None
+        if kind == "regular":
+            try:
+                size = os.path.getsize(real)
+            except OSError:
+                size = None
+        files.append({"path": path, "realpath": real, "inside_root": inside, "kind": kind, "size": size})
+        if not inside or kind != "regular" or not size:
+            missing.append(path)
+    if missing:
+        fail(EXIT_CONFLICT, KIND_CONFLICT,
+             "以下制品不存在、越界或为空：" + "、".join(missing), {"missing": missing})
+    emit({"ok": True, "files": files})
+
+
 COMMANDS = {
     "plan": cmd_plan,
     "acquire": cmd_acquire,
     "verify": cmd_verify,
+    "check-files": cmd_check_files,
     "read-report": cmd_read_report,
 }
 
@@ -320,7 +352,7 @@ def load_payload(options):
 
 def main(argv):
     if len(argv) < 1 or argv[0] not in COMMANDS:
-        fail(EXIT_ARGUMENT, KIND_ARGUMENT, "用法：precheck.py plan|acquire|verify|read-report (--json <JSON>|--json-file <路径>)")
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, "用法：precheck.py plan|acquire|verify|check-files|read-report (--json <JSON>|--json-file <路径>)")
     options, i = {}, 1
     while i < len(argv):
         flag = argv[i]

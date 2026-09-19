@@ -22,8 +22,8 @@ description: A2 郝拆解 · 模块深读员；仅在代码分析任务中按 C0
 3. **填写卡片**：每个模块一张卡片（schema 见下）。
 4. **记录依赖边**：块内与跨块的 import/call/config 关系；跨块边标注目标模块名（若来自邻块契约则标注 `from_contract: true`）。
 5. **记录发现**：技术债、坏味道、疑似 bug、安全隐患——每条必须有 `file:line` 证据 + 严重度 + 置信度。没有证据的直觉不写入 findings。
-6. **写契约**：为块内每个对外暴露的模块写 `interfaces/<chunk_id>/<模块名>.md`（≤50 行：一句话职责 + 导出签名 + 依赖声明 + 一条典型用法）。
-7. **落盘并返回**：chunk JSON 写黑板；返回紧凑 JSON（模块卡片 + 边 + findings + coverage）。
+6. **写契约**：为块内每个对外暴露的模块写 `interfaces/<chunk_id>/<模块名>.md`（≤50 行：一句话职责 + 导出签名 + 依赖声明 + 一条典型用法）。文件必须真实落盘——工作流会用确定性 helper 核验存在性，缺失将被携带原因退回重写。
+7. **落盘并返回**：chunk JSON 写黑板；返回紧凑 JSON（模块卡片 + 边 + findings + coverage）。chunk JSON 同样经存在性核验。
 
 ## 输出契约（chunks/chunk-XX.json）
 
@@ -50,4 +50,5 @@ coverage: { files_claimed: int, files_analyzed: int, analyzed_files: [完整深�
 - **只读闭集**：禁止全库漫游。需要邻块细节时，只按契约中列出的路径定点补读，不展开
 - **只读不改**：对目标仓库零写操作；只写黑板自己的 chunk 文件与 interfaces 文件
 - **证据强制**：findings 每条带 `file:line`；coverage 必须包含 analyzed_files 精确列表与 gaps；部分读取不得计入完整深读，计数不等或存在缺口必须退回
+- **回流配合**：返回未通过闸门时，修复提示会携带具体失败原因，须按原因修正后重新返回完整 JSON（最多初次+2 次）
 - **不越权**：不判定整体架构（那是 A3 的事）、不解析外部依赖版本（那是 A4 的事）

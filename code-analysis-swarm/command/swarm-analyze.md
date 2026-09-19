@@ -10,14 +10,14 @@ argument-hint: "<目标仓库绝对路径> [分析意图]"
 ## 定位插件与输出目录
 
 1. 从宿主安装信息取得本插件绝对路径，记为 `team_root`，读取其中 `DESIGN.md` 与 `agents/`。只有宿主提供已解析的 `${ZCODE_PLUGIN_ROOT}` 时才可直接使用它；不要假定命令正文支持模板插值。若未取得路径，请用户提供实际安装目录，不猜测 `.analysis-team/` 或开发者个人路径。
-2. 明确目标绝对路径与目标外的现有 `output_root`；确认真实路径（含符号链接）与读写边界。每次生成新 `run_id`，排他创建 `output_root/run_id/` 黑板。若目录已存在、输出位于目标内、黑板包含目标或写入插件目录，停止并给出原因。禁止覆盖旧黑板。
+2. 明确目标绝对路径；`output_root` 与 `run_id` 可选——使用 DWF 时缺省由确定性 helper（`scripts/precheck.py`）在宿主 workspace 下排他创建 `.code-analysis-swarm-runs/<run_id>`。预检（realpath/目录关系/敏感路径/排他创建）与后续制品、报告核验均以 helper 回执为准，不采信代理自述布尔。若输出位于目标内、黑板包含目标或写入插件目录，停止并给出原因。禁止覆盖旧黑板。
 3. 角色读取各自完整提示词，任务参数总是附上目标、输入闭集、黑板和输出路径。只允许在黑板中写自己的制品。
 
 ## 路由与派发
 
 - ≤10 个源文件：A1 轻量勘察 → A2 → A6（有关键结论时）→ A7。跳过专项要明确列为未覆盖。
 - 中型仓库：A1 → A2 各块并行 → A3/A4/A5 并行 → A6 → A7。
-- >100 个文件或 >50k LOC：如果当前宿主已验证支持并注册 DWF，可运行 `workflow/code-analysis.dwf.ts`，显式传入 target/team_root/output_root/run_id；否则使用标准 SOP。插件安装不代表 DWF 已注册。
+- >100 个文件或 >50k LOC：如果当前宿主已验证支持并注册 DWF，可运行 `workflow/code-analysis.dwf.ts`，显式传入 target/team_root（output_root/run_id 可选，缺省由 helper 生成）；否则使用标准 SOP。插件安装不代表 DWF 已注册。
 - 单维分析：只调度相关角色，其他维度标记未覆盖。
 - 复析：新建本次黑板；当前实现全量重跑，不凭块名或旧报告存在而宣称缓存有效。
 
@@ -26,12 +26,12 @@ argument-hint: "<目标仓库绝对路径> [分析意图]"
 ## 五道闸门
 
 - G1：独立源文件枚举与 chunks 文件集合严格相等，无重复、漏项或越界；每块 ≤5000 LOC/≤150 文件，按规模分块，不限取前 N 块。
-- G2：按 DESIGN.md 的 snake_case 契约检查全部字段；逐文件 analyzed_files 与闭集一致，gaps 为空；findings/edges 有来源，模块名唯一，契约路径正确。
-- G3：专项模块引用存在，A5 覆盖全部已识别构建入口，未覆盖维度如实记录。
-- G4：高严重度发现、入口判定与全部专项 claims 均有且仅有一个 verdict；confirmed/refuted 有独立证据，无法查证用 unverified，不把证据不足写成反证。
-- G5：报告含 0–8 节、完整覆盖声明和所有送验状态；refuted 不删除，unverified 不计为 verified。报告只写本次黑板路径。
+- G2：按 DESIGN.md 的 snake_case 契约检查全部字段（edges 的 from_contract 为可选布尔，缺省 false）；逐文件 analyzed_files 与闭集一致，gaps 为空；findings/edges 有来源，模块名唯一，契约路径正确；chunk JSON 与 interfaces 契约经 helper 核验真实落盘。
+- G3：专项模块引用存在，A5 覆盖全部已识别构建入口，未覆盖维度如实记录；specialty/*.md 与 graph/*.csv 经核验真实落盘。
+- G4：高严重度发现、入口判定与全部专项 claims 均有且仅有一个 verdict（source_role 为角色名）；confirmed/refuted 有独立证据，无法查证用 unverified，不把证据不足写成反证；verdicts.json 落盘。
+- G5：报告含 0–8 节、完整覆盖声明和所有送验状态；refuted 不删除，unverified 不计为 verified。报告只写本次黑板路径，且只引用任务参数中经核验存在的制品清单。
 
-使用工作流时机械门禁已实现；手动 SOP 必须使用实际工具检查制品，不声称仅凭类型或提示词已经自动验证。门禁失败最多纠正两轮；仍失败交付 blocked/partial 及证据缺口，不能声明全面分析完成。
+使用工作流时机械门禁已实现；手动 SOP 必须使用实际工具检查制品，不声称仅凭类型或提示词已经自动验证。门禁失败按类别处理：schema/覆盖/闭合缺项等可修复问题携带具体失败原因退回同一代理实例，最多初次+2 次修复尝试；路径逃逸、权限、未知副作用或同错复发直接 blocked。仍失败交付 blocked/partial 及证据缺口，不能声明全面分析完成；blocked 时已完成独立验证的 confirmed 发现保留在返回值与"部分完成"报告中，不返回空 findings。
 
 ## 升级与交付
 
