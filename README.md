@@ -1,6 +1,19 @@
 # agents · ZCode 智能体体系集合
 
-ZCode（Z.ai CLI）里可直接使用的多智能体体系集合。每个子目录是一套完整体系：角色提示词 + 编排命令 + 动态工作流脚本。
+ZCode 智能体与插件集合：保留只读代码分析能力，新增面向新手的需求、开发交接、真实验收进度和本地文件快照。
+
+## Dev Companion · 新手开发陪伴
+
+先读 [新手使用说明](dev-companion/README.md)。在 ZCode 的插件市场添加本仓库根目录（包含 `marketplace.json`），安装 `dev-companion`，新建任务后在 `/` 菜单选择 `companion-start`，描述你的想法。无需手写 JSON。
+
+- 需求卡 → 确认首版 → 开发者执行 → 独立检查 → 必要的用户试用 → 真实进度。
+- 每项功能有可修改文件和检查要求；执行者回报只到待验收，不能直接修改百分比。
+- 项目事实保存在 `.dev-companion/`；修改需求或项目内容会使相关验收需要复查。
+- 本地快照只保护显式纳管文件，恢复前预览增改删、保护当前内容，不操作 Git 历史。
+
+首次验证可用 [小型记账演示](dev-companion/examples/README.md)。首版需要 Python 3.9+ 和 ZCode 的工具执行能力；没有原生侧边栏、自动发布、数据库恢复或后台自动刷新。
+
+[本次仓库评审与实现边界](docs/dev-companion-review.md) 记录分析团适配理由和验证范围。
 
 ## code-analysis-swarm · 代码分析智能团
 
@@ -19,26 +32,38 @@ ZCode（Z.ai CLI）里可直接使用的多智能体体系集合。每个子目�
 | A6 | 交叉验证 | 铁证如 | 独立复查关键结论（confirmed / refuted） |
 | A7 | 报告撰写 | 文汇章 | 组装最终报告（只组织不新造结论） |
 
-配套机制：G1~G5 硬性闸门、L1/L2/L3 决策矩阵、6 条回流通道、黑板（`analysis/<repo>/`）缓存与 git 增量复析。
+配套机制：G1~G5 结构闸门、L1/L2/L3 决策矩阵、回流通道和按运行隔离的黑板。运行时检查制品结构和引用覆盖；代理实际读取与落盘仍需宿主验证，不等于代码开发完成。
 
 ### 安装（ZCode 环境）
 
-1. **斜杠命令方式**：把 `code-analysis-swarm/` 复制到你的 ZCode 工作区（例如命名为 `.analysis-team/`），把 `command/my-team.md` 放到工作区 `.agents/commands/my-team.md`，重启会话后即可用 `/my-team <仓库路径>`。
-2. **全局工作流方式**：让 ZCode 执行 SaveWorkflow，把 `workflow/code-analysis.dwf.ts` 注册为全局工作流（名 `code-analysis-swarm`）。之后任何窗口说「运行已保存的工作流 code-analysis-swarm，target 是 D:\xxx」。
-3. **路径适配**：脚本内 `const ROLE = "C:/Users/G/.zcode/workspace/default/.analysis-team/agents"` 是原机器的绝对路径——换机器/换工作区时，改成你本机 `.analysis-team/agents` 的绝对路径（保证角色提示词可被任意窗口定位）。
+1. 在 ZCode 插件市场添加本仓库根目录，安装同市场的 `code-analysis-swarm` `0.2.1`。
+2. 新建任务，在 `/` 菜单选择插件的 `swarm-analyze` 命令，提供目标路径与分析意图。角色和设计文档从实际安装目录读取。
+3. 动态工作流是可选路径，只有当前宿主确实支持时才使用。运行参数为 `target`、`team_root`、`output_root`、`run_id`；输出目录必须在目标之外，每次使用新的运行编号。具体约束和手动 SOP 后备见 [DESIGN.md](code-analysis-swarm/DESIGN.md)。
 
 ### 使用
 
 ```
-/my-team D:\projects\my-app                # 自动选通道（快速/标准 SOP）
-/my-team D:\projects\my-app 只要依赖和构建   # 单维分析
-/my-team D:\projects\my-app 重新分析        # 增量复析（git 圈变更）
+/swarm-analyze D:\projects\my-app                # 按实际规模选择分析路径
+/swarm-analyze D:\projects\my-app 只要依赖和构建   # 单维分析
+/swarm-analyze D:\projects\my-app 重新分析        # 建立新的运行记录
 ```
 
-报告与中间制品落在运行工作区的 `analysis/<项目名>/` 下；`report/analysis-report.md` 为最终交付物。
+报告与中间制品落在目标之外的 `<output_root>/<run_id>/` 下；`report/analysis-report.md` 为最终交付物。不复用旧运行目录，不默认改写任何用户记忆文件。
 
 ### 硬约束速览
 
 - 对目标仓库**零写操作**；构建默认静态分析（`executed: false`）
 - 一切结论必须带 `file:line` 证据；验证员与被验证者不共享上下文
 - 报告必须含「覆盖声明」：分析了什么、没分析什么、为什么
+
+## 本地验证
+
+从仓库根运行：
+
+```sh
+python3 -m unittest discover -s tests -v
+node --test tests/swarm_workflow.test.mjs
+python3 -m unittest discover -s dev-companion/examples/demo-project -v
+```
+
+Python 测试覆盖状态、完成度、过期证据、范围变更、文件快照与恢复故障。Node 测试需要 Node 24，执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回；它不替代真实 ZCode 动态工作流验收。

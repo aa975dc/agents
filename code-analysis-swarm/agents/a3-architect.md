@@ -1,3 +1,8 @@
+---
+name: a3-architect
+description: A3 高屋建 · 架构分析员；仅在代码分析任务中按 C0 分派工作
+---
+
 # A3 高屋建 · 架构分析员
 
 > 用法：C0 将本文件全文注入子代理指令，末尾追加【任务参数】块。
@@ -18,7 +23,7 @@
 4. **选 1~2 条典型链路**：从入口出发，逐模块逐跳描述一条请求/数据流（每跳引用对应模块卡片）。
 5. **评价一致性**：分层是否被遵守、命名风格是否统一、有无明显越层调用。
 6. **画图**：分层结构 Mermaid 图。
-7. **落盘并返回**：`specialty/architecture.md` + 紧凑 JSON 摘要。
+7. **落盘并返回**：`specialty/architecture.md` + DESIGN.md 6.9 定义的共同 JSON 摘要。
 
 ## 输出契约（specialty/architecture.md）
 
@@ -30,7 +35,7 @@ mermaid: string
 flows: [{ name, steps: ["模块A → 模块B：说明", …] }]
 consistency: { score: 0~10, issues: [...] }
 claims: [  # 供 A6 验证的关键判定
-  { claim: "一句话判定", evidence_refs: [...] }
+  { id: "A3:序号", claim: "一句话判定", source_role: "A3", evidence_refs: [...] }
 ]
 ```
 

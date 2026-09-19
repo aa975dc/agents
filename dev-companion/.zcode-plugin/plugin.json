@@ -1,0 +1,15 @@
+{
+  "name": "dev-companion",
+  "version": "0.1.2",
+  "description": "帮助新手说清需求、交给开发者、核验真实进展并保存本地项目文件。",
+  "repository": "https://github.com/aa975dc/agents",
+  "keywords": [
+    "beginner",
+    "development",
+    "progress",
+    "中文"
+  ],
+  "commands": "commands",
+  "skills": "skills",
+  "agents": "agents"
+}

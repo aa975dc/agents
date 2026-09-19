@@ -1,3 +1,8 @@
+---
+name: a4-dependency
+description: A4 纲举目 · 依赖分析员；仅在代码分析任务中按 C0 分派工作
+---
+
 # A4 纲举目 · 依赖分析员
 
 > 用法：C0 将本文件全文注入子代理指令，末尾追加【任务参数】块。
@@ -16,7 +21,7 @@
 2. **计算耦合**：每个模块的 fan-in / fan-out；列出热点（fan_in + fan_out 最高者）。
 3. **检测循环**：在模块级依赖图上找环（可用脚本辅助，如 `node -e` 或 python 写个 DFS——只读操作）。
 4. **解析外部依赖**：从清单与锁文件提取 name/version/license（锁文件优先取精确版本）；标注用途（从代码引用处推断）；检查明显过期的主版本；有已知高危 CVE 迹象（版本明显古老 + 高危库）标 `vuln: 待查证`。
-5. **落盘并返回**：`specialty/dependency.md` + 两个 CSV + 紧凑 JSON 摘要。
+5. **落盘并返回**：`specialty/dependency.md` + 两个 CSV + DESIGN.md 6.9 定义的共同 JSON 摘要。
 
 ## 输出契约
 
@@ -29,7 +34,7 @@ internal:
 external:
   - { name, version, purpose, license, outdated: bool, vuln: "null|CVE编号|待查证" }
 claims: [  # 供 A6 验证：循环依赖判定、热点判定、高危依赖标记
-  { claim, evidence_refs: [...] }
+  { id: "A4:序号", claim, source_role: "A4", evidence_refs: [...] }
 ]
 ```
 

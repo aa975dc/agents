@@ -1,0 +1,10 @@
+{
+  "feature_id": "sum-expenses",
+  "run_id": "REPLACE_WITH_ACTUAL_PACKET_RUN_ID",
+  "scope_version": 1,
+  "status": "implemented",
+  "summary": "模板：请替换为本次实际实现内容，不能直接导入作为真实完成回报",
+  "changed_files": [],
+  "evidence_files": ["test_ledger.py"],
+  "blocker": null
+}
