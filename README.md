@@ -4,16 +4,17 @@ ZCode 智能体与插件集合：保留只读代码分析能力，新增面向�
 
 ## Dev Companion · 新手开发陪伴
 
-先读 [新手使用说明](dev-companion/README.md)。在 ZCode 的插件市场添加本仓库根目录（包含 `marketplace.json`），安装 `dev-companion`，新建任务后在 `/` 菜单选择 `companion-start`，描述你的想法。无需手写 JSON。
+先读 [新手使用说明](dev-companion/README.md)。在 ZCode 的插件市场添加本仓库根目录（包含 marketplace.json），安装或更新 dev-companion 0.2.0，新建任务后从 / 菜单选择 companion-start。已有源码修改不会自动更新安装副本。
 
-- 需求卡 → 确认首版 → 开发者执行 → 独立检查 → 必要的用户试用 → 真实进度。
-- 每项功能有可修改文件和检查要求；执行者回报只到待验收，不能直接修改百分比。
-- 项目事实保存在 `.dev-companion/`；修改需求或项目内容会使相关验收需要复查。
-- 本地快照只保护显式纳管文件，恢复前预览增改删、保护当前内容，不操作 Git 历史。
+- 白话概念 → 每轮 1–3 个需求问题 → 产品方案 → 产品流程 → 真实原型或模块操作样例 → 技术与接口约定。
+- 单项串行开发 → 独立功能检查与真实联调 → 用户试用 → 修复与重新验收 → 发布准备 → 按授权部署和目标验证。
+- 七个入口保留开始、进度、开发、检查、存档、续接，新增 companion-release；不为每个阶段新建 Agent。
+- 规划、功能完成度和发布分开记录；本地、预发布和正式环境分开表述。更改依据后复查下游和旧证据。
+- 项目事实保存在 .dev-companion/；旧功能台账无需迁移，未发生的规划历史不会被补造。快照仍只保护显式纳管普通文件。
 
-首次验证可用 [小型记账演示](dev-companion/examples/README.md)。首版需要 Python 3.9+ 和 ZCode 的工具执行能力；没有原生侧边栏、自动发布、数据库恢复或后台自动刷新。
+需要 Python 3.9+ 和 ZCode 的工具执行能力。发布使用项目已经明确的命令，不内置云账号或自动购买服务器，没有后台监控或原生侧边栏。现成小型模块见 [记账演示](dev-companion/examples/README.md)，它不代替新版完整生命周期验收。
 
-[本次仓库评审与实现边界](docs/dev-companion-review.md) 记录分析团适配理由和验证范围。
+[生命周期实施记录](docs/dev-companion-lifecycle.md) 说明新接口、衔接与验证范围；[既有评审](docs/dev-companion-review.md) 保留旧版本历史。
 
 ## code-analysis-swarm · 代码分析智能团
 
@@ -66,4 +67,4 @@ node --test tests/swarm_workflow.test.mjs
 python3 -m unittest discover -s dev-companion/examples/demo-project -v
 ```
 
-Python 测试覆盖状态、完成度、过期证据、范围变更、文件快照与恢复故障。Node 测试需要 Node 24，执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回；它不替代真实 ZCode 动态工作流验收。
+Python 测试覆盖规划草案与失效、状态、完成度、接口检查、发布证据、范围变更、文件快照与恢复故障。Node 测试需要 Node 24，执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回；它不替代真实 ZCode 动态工作流验收。

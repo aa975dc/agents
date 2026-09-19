@@ -30,3 +30,10 @@ python3 dev-companion/examples/demo-project/ledger.py
 手动体验 CLI 时，按 [CLI 约定](../references/cli-contract.md) 依次运行 `doctor → init → confirm → packet → receipt → check → accept → status`。`confirm` 需要刚读取的 revision；回报模板中的执行编号和范围版本必须从真实 packet 替换，`--user-confirmed` 只能在用户确实同意后传入。
 
 示例代码若没有改变，`changed_files` 保持空数组；实际改过才列出相应文件。scope 和 receipt 输入请放项目外的临时目录或 `.dev-companion/inputs/`，不在任务派发后把它们写入源码目录。
+# 完整生命周期演示（0.2.0）
+
+从仓库根运行 `python3 -B dev-companion/examples/lifecycle_demo.py`。脚本创建新的隔离目录，执行 23 步真实 CLI：早期草案、六阶段规划、开发回报、故意失败后的修复、功能与 HTTP 联调检查、验收及本地部署验证。
+
+输出包含项目路径、状态板和网页启动命令；`.dev-companion/demo-evidence/` 保留每步退出码和原始输出。结果为 `local_verified`、`human_trial=false`。可传 `--project` 指定不存在或空目录，已有非空目录会被拒绝。
+
+下方保留原有小型模块演示，用于验证旧版需求、快照和恢复流程。
