@@ -200,10 +200,20 @@ class Project:
         return {"required": True, "safety_archive_id": record.get("safety_archive_id") if isinstance(record, dict) else None,
                 "message": "上次恢复未完成；请先核对保护存档和 restore-pending.json，暂停制作与验收"}
 
+    def orphan_release_note(self):
+        if (not self.state_path.exists() and not self.state_path.is_symlink()
+                and (self.data / "release.json").is_file()):
+            return ("项目状态 state.json 缺失，但发布记录 release.json 仍保留；不会自动重建状态，也不会把旧发布当作当前已验收。"
+                    "请先从备份恢复 state.json；若确认放弃该发布历史，请人工移走 release.json 后再重新 init")
+        return None
+
     def load(self):
         if self.state_path.is_symlink():
             raise CompanionError("项目记录不能是文件链接")
         if not self.state_path.exists():
+            orphan = self.orphan_release_note()
+            if orphan:
+                raise CompanionError(orphan)
             raise CompanionError("尚未建立需求记录，请先整理需求并运行 init")
         state = read_json(self.state_path)
         if (not isinstance(state, dict) or state.get("schema_version") != 1 or
@@ -320,7 +330,8 @@ class Project:
                     excluded.append(relative)
                     continue
                 if not path.is_file():
-                    raise CompanionError("不支持特殊文件：" + relative)
+                    excluded.append(relative + "（特殊文件，未纳入项目检查）")
+                    continue
                 info = path.stat()
                 total += info.st_size
                 if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
@@ -335,6 +346,9 @@ class Project:
     def init(self, scope):
         scope = validate_scope(scope)
         with self.locked():
+            orphan = self.orphan_release_note()
+            if orphan:
+                raise CompanionError(orphan)
             if self.state_path.exists() or self.state_path.is_symlink():
                 raise CompanionError("已有项目记录；修改范围请使用 scope，避免覆盖历史")
             state = {"schema_version": 1, "project": str(self.root), "revision": 0,
@@ -586,6 +600,9 @@ class Project:
 
     def status(self, include_release=True, snapshot=None):
         from journey import Journey
+        orphan = self.orphan_release_note()
+        if orphan:
+            raise CompanionError(orphan)
         planning = Journey(self).status()
         if not self.state_path.exists() and not self.state_path.is_symlink() and planning:
             view = {"schema_version": 1, "title": "产品规划", "goal": "先明确产品，再形成可执行范围",

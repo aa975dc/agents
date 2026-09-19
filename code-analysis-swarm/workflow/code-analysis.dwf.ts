@@ -131,7 +131,7 @@ try {
 
   // 先读角色并由宿主执行真实路径预检；失败时不写黑板、不分析目标。
   stage = "路径预检";
-  phase(stage);
+  phase("路径预检");
   const preflight = await agent("路径预检员·罗经纬").ask<{
     target_status: string; target_realpath: string; output_realpath: string; team_realpath: string;
     board_created_exclusive: boolean; evidence: string;
@@ -151,7 +151,7 @@ try {
     cardTitle: "title", detail: [{ field: "files", label: "文件数" }],
   });
   stage = "G1 勘察闭合";
-  phase(stage);
+  phase("G1 勘察闭合");
   const map = await agent("勘察员·罗经纬").ask<CodebaseMap>([
     `先读 ${ROLE}/a1-scout.md。只读目标 ${JSON.stringify(target)}；黑板 ${JSON.stringify(board)}；不得写目标或插件目录。`,
     `manifest 写 ${board}/manifest.json；返回完整同构 JSON，统一 snake_case，严格遵守 DESIGN.md 6.1。`,
@@ -184,7 +184,7 @@ try {
   for (const c of map.chunks) report({ id: c.id, title: c.id, files: c.files.length, status: "待分析" }, "chunks");
 
   stage = "G2 块结果合格";
-  phase(stage);
+  phase("G2 块结果合格");
   const moduleResults = await Promise.all(map.chunks.map(async c => {
     const r = await agent(`模块深读员·${c.id}`).ask<ModuleResult>([
       `先读 ${ROLE}/a2-module-analyst.md；按 DESIGN.md 6.2 返回完整 snake_case JSON。`,
@@ -216,7 +216,7 @@ try {
   checked.push(`G2：${map.chunks.length} 块返回的制品字段与逐文件覆盖检查通过`);
 
   stage = "G3 专项闭合";
-  phase(stage);
+  phase("G3 专项闭合");
   const specialties = await Promise.all([
     ["a3-architect.md", "架构分析员·高屋建", "architecture"],
     ["a4-dependency.md", "依赖分析员·纲举目", "dependency"],
@@ -241,7 +241,7 @@ try {
   checked.push("G3：专项引用与已声明构建入口覆盖检查通过；未运行真实构建");
 
   stage = "G4 独立验证";
-  phase(stage);
+  phase("G4 独立验证");
   const toVerify: Claim[] = [
     ...specialties.flatMap(s => s.claims),
     ...map.entry_points.map((e, i) => ({ id: `entry-${i}`, claim: `程序入口：${e.path}；${e.why}`, source_role: "A1", evidence_refs: [e.evidence] })),
@@ -265,7 +265,7 @@ try {
   checked.push(`G4：${toVerify.length} 条送验结论全部有状态；${confirmed} confirmed / ${refuted} refuted / ${unverified} unverified`);
 
   stage = "G5 报告制品";
-  phase(stage);
+  phase("G5 报告制品");
   const coverage = { files: map.source_files.length, files_analyzed: moduleResults.reduce((n, r) => n + r.coverage.files_analyzed, 0), chunks: map.chunks.length, verdicts: verdicts.length, confirmed, refuted, unverified };
   const notCovered = [
     "未运行真实构建/测试；静态分析不等于软件验收或开发完成",

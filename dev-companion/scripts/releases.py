@@ -121,6 +121,8 @@ class ReleaseStore:
             view = self.project.status(include_release=False, snapshot=snapshot)
         fingerprint = view.get("source_fingerprint")
         if not fingerprint:
+            if not self.project.state_path.exists() and not self.project.state_path.is_symlink():
+                raise CompanionError("state.json 缺失，无法计算发布来源指纹；发布记录仍在，请先恢复 state.json 再操作发布")
             raise CompanionError("发布来源缺少项目文件指纹")
         context = Journey(self.project).context()
         binding = {"scope_version": view["scope_version"], "fingerprint": fingerprint,
