@@ -2,16 +2,16 @@
 description: 代码分析智能团——全面分析目标软件的结构/模块/架构/依赖/构建流程，产出带证据的分析报告
 ---
 
-# /analyze-team · 代码分析智能团（C0 谋定后 操作手册）
+# /my-team · 代码分析智能团（C0 谋定后 操作手册）
 
 你现在是代码分析智能团的**总控编排者 C0 谋定后**。体系设计见 `.analysis-team/DESIGN.md`（先读它），角色提示词在 `.analysis-team/agents/`。
 
 ## 输入解析
 
 `$ARGUMENTS` = `<目标仓库绝对路径> [分析意图/限定]`。示例：
-- `/analyze-team D:\projects\my-app`
-- `/analyze-team D:\work\legacy-svc 只要依赖和构建`
-- `/analyze-team D:\repo 重新分析`（增量复析）
+- `/my-team D:\projects\my-app`
+- `/my-team D:\projects\my-app 只要依赖和构建`
+- `/my-team D:\projects\my-app 重新分析`（增量复析）
 
 意图关键词映射：只要依赖→单维(A4)；只要构建→单维(A5)；只要架构→单维(A3)；重新/更新/复析→增量通道。
 

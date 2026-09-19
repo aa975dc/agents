@@ -23,16 +23,16 @@ ZCode（Z.ai CLI）里可直接使用的多智能体体系集合。每个子目�
 
 ### 安装（ZCode 环境）
 
-1. **斜杠命令方式**：把 `code-analysis-swarm/` 复制到你的 ZCode 工作区（例如命名为 `.analysis-team/`），把 `command/analyze-team.md` 放到工作区 `.agents/commands/analyze-team.md`，重启会话后即可用 `/analyze-team <仓库路径>`。
+1. **斜杠命令方式**：把 `code-analysis-swarm/` 复制到你的 ZCode 工作区（例如命名为 `.analysis-team/`），把 `command/my-team.md` 放到工作区 `.agents/commands/my-team.md`，重启会话后即可用 `/my-team <仓库路径>`。
 2. **全局工作流方式**：让 ZCode 执行 SaveWorkflow，把 `workflow/code-analysis.dwf.ts` 注册为全局工作流（名 `code-analysis-swarm`）。之后任何窗口说「运行已保存的工作流 code-analysis-swarm，target 是 D:\xxx」。
 3. **路径适配**：脚本内 `const ROLE = "C:/Users/G/.zcode/workspace/default/.analysis-team/agents"` 是原机器的绝对路径——换机器/换工作区时，改成你本机 `.analysis-team/agents` 的绝对路径（保证角色提示词可被任意窗口定位）。
 
 ### 使用
 
 ```
-/analyze-team D:\projects\my-app                # 自动选通道（快速/标准 SOP）
-/analyze-team D:\projects\my-app 只要依赖和构建   # 单维分析
-/analyze-team D:\projects\my-app 重新分析        # 增量复析（git 圈变更）
+/my-team D:\projects\my-app                # 自动选通道（快速/标准 SOP）
+/my-team D:\projects\my-app 只要依赖和构建   # 单维分析
+/my-team D:\projects\my-app 重新分析        # 增量复析（git 圈变更）
 ```
 
 报告与中间制品落在运行工作区的 `analysis/<项目名>/` 下；`report/analysis-report.md` 为最终交付物。

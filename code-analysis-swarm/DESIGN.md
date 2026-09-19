@@ -413,14 +413,14 @@ executed: false                                        # 实际执行构建时�
 └── workflow/
     └── code-analysis.dwf.ts        # 动态工作流脚本（大库通道）
 
-.agents/commands/analyze-team.md    # /analyze-team 斜杠命令（C0 操作手册）
+.agents/commands/my-team.md         # /my-team 斜杠命令（C0 操作手册）
 ```
 
 **两条执行路径**：
 
 | 路径 | 入口 | 适用 | 特点 |
 |------|------|------|------|
-| A. 斜杠命令 | `/analyze-team <仓库路径> [意图]` | 小/中库 | 主会话当 C0，用 Agent 工具派发，零确认开销 |
+| A. 斜杠命令 | `/my-team <仓库路径> [意图]` | 小/中库 | 主会话当 C0，用 Agent 工具派发，零确认开销 |
 | B. 动态工作流 | 已注册为全局工作流 `code-analysis-swarm`（参数 target = 仓库绝对路径） | 大库 | 类型化结果、阶段图审批、断点恢复、进度看板 |
 
 两条路径共用同一套角色提示词与黑板布局，可互相切换。角色提示词以绝对路径引用，工作流在任意工作区运行都能找到同一套角色定义。
@@ -430,8 +430,8 @@ executed: false                                        # 实际执行构建时�
 | 场景 | 用法 |
 |------|------|
 | **任何 ZCode 窗口（任意文件夹）** | 对话里说：「运行已保存的工作流 `code-analysis-swarm`，target 是 `D:\xxx`」。全局注册不挑工作区；报告与黑板落在**当前窗口的工作区** `analysis/<repo名>/` 下 |
-| 本默认工作区的窗口 | 直接 `/analyze-team D:\xxx`（斜杠命令原生加载）；也可用上面的工作流方式 |
-| 其他文件夹也想要斜杠命令 | 把 `.analysis-team/` 文件夹与 `.agents/commands/analyze-team.md` 复制到那个项目根目录 |
+| 本默认工作区的窗口 | 直接 `/my-team D:\xxx`（斜杠命令原生加载）；也可用上面的工作流方式 |
+| 其他文件夹也想要斜杠命令 | 把 `.analysis-team/` 文件夹与 `.agents/commands/my-team.md` 复制到那个项目根目录 |
 | 任何窗口、不用工作流 | 对话说：「按 `C:\Users\G\.zcode\workspace\default\.analysis-team\DESIGN.md` 的体系作为 C0，分析 `D:\xxx`」——体系与角色提示词都在磁盘上，任何会话读了就能照跑 |
 
 ---
