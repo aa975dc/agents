@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T16:00:29+00:00",
+  "generated_at": "2026-09-20T17:06:15+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "526e3168feded7597cfa11f80331634f81bcc866"
+    "commit": "baace06993efb531cf7ec8c6f04ff3a7238c63f5"
   },
   "target": {
     "plugin": "dev-companion",
@@ -262,8 +262,8 @@
     },
     {
       "path": "agents_kernel/storage/team.py",
-      "sha256": "bfde8d374b41cda801f26ccaa9a9f8081bde237303d36ecb819817c2ddbcf462",
-      "bytes": 6170
+      "sha256": "640216bf54f7ac8f7a40701911ffe4277e35de85caff91ab33632b0973186c58",
+      "bytes": 13317
     },
     {
       "path": "agents_kernel/validation.py",

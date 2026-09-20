@@ -88,6 +88,9 @@ def parser():
     child.add_argument("--from-json", action="store_true", dest="from_json",
                        help="从本项目旧三 JSON（state/journey/release）只读导入")
     child.add_argument("--dry-run", action="store_true")
+    child = sub.add_parser("team-rollback")
+    child.add_argument("--export-first", dest="export_first", metavar="DIR",
+                       help="回退前先把全量事实导出到该目录（存在迁移后新写入时必填）")
     return root
 
 
@@ -169,6 +172,8 @@ def run(args):
         if name == "team-task":
             return team.set_task_status(args.project, args.task_id, args.feature,
                                         args.status, expect_seq=args.expect_seq)
+        if name == "team-rollback":
+            return team.rollback_store(args.project, export_first=args.export_first)
         if not args.from_json:
             raise CompanionError("team-migrate 需要 --from-json 指定从旧三 JSON 导入")
         return team.migrate_from_json(args.project, dry_run=args.dry_run)
