@@ -424,3 +424,14 @@ class ArchiveStore:
             raise ArchiveError("恢复未完成：" + str(exc) + "。保护存档：" + safety_id, safety_id) from exc
         return {"archive_id": archive_id, "safety_archive_id": safety_id, "status": "restored",
                 "changed_paths": pending["applied_paths"], "notice": BACKUP_NOTICE}
+
+
+def export_compat(project_dir, out_dir):
+    """把已导入 SQLite 事实库的项目导出为旧版兼容 JSON 草稿（P2-04，CLI 不可见纯函数）。
+
+    只读旁路：委托 agents_kernel.storage.migration.fallback_export，导出目录由调用方
+    指定，绝不覆盖项目 .dev-companion 下的原 state/journey/release.json；与存档/恢复
+    逻辑（ArchiveStore）完全无关，不读取也不写入 archives/。
+    """
+    from agents_kernel.storage import migration
+    return migration.fallback_export(project_dir, out_dir)
