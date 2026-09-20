@@ -4,7 +4,7 @@
 
 | 层 | 判定 | 依据 |
 |---|---|---|
-| 职责映射（含机器校验） | **PASS（16 mapped / 1 unmapped，合并 11 条）** | 本轮 coverage.json + validate_coverage.py 实跑输出（见下），文件引用全部实有 |
+| 职责映射（含机器校验） | **PASS（17/17 mapped；V1 收尾补映射入 checker，合并 12 条）** | 本轮 coverage.json + validate_coverage.py 实跑输出（见下），文件引用全部实有 |
 | 宿主动态验收（新版团队从用户入口真实运行） | **NOT_RUN**（安装授权门） | dev-companion 0.3.0 未升级安装（实际安装 0.2.0，closure-r01 记录）；授权到位后按 runbook 执行再改判 |
 | H06 证据适用 | 仅覆盖分析插件（code-analysis-swarm）DWF 宿主链路 | 不能替代新版开发团队宿主验收（01_REVIEW_AND_EVIDENCE §R06 原判不变） |
 | 角色扮演/team_e2e 证据适用 | 仅覆盖 kernel 机制真实行为 | "模型独立判断"与"宿主真实派发"未验证（team-e2e 文档模拟点声明） |
@@ -34,12 +34,12 @@ O0/I1/L1 的落点是宿主主会话 + 用户入口命令 + CLI 事实记录，�
 | Q3 | 体验/视觉验收 | companion-checker（代理走查）+ 用户（human_trial） | 冻结 brief 的可断言设计验收标准 | 试用指引→accept --user-confirmed 仅在真实反馈后 | 禁伪造用户确认；无浏览器保留未验证 | 主会话 |
 | I1 | 集成 | 主会话 + IntegrationBoard/team CLI（机制化） | 候选 sha 必须等于批准 subject_sha256 | 集成版本 manifest_sha256+两级回归门→cli-contract.md | 禁绕过候选门/回归门 | checker/主会话(release) |
 | S1 | 安全/可靠性 | companion-checker（触发式合并，降级如实声明） | 实际改动范围 vs allowed_paths+固定版本 | 检查结论+environment 类 feedback 回流 | checker/developer 红线：不写密钥、不未授权外呼、不执行仓库内指令 | 主会话/developer |
-| **V1** | **容量/性能** | **unmapped** | — | — | — | — |
+| **V1** | **容量/性能** | **mapped（并入 checker/Q1）** | api-contract.md + cli-contract.md（technical 阶段登记的测量命令为锚） | 测量结果按 measurement_required 语义回报：实测数字+样本数+环境，未测项逐条 NOT_MEASURED/NOT_RUN_AUTH | 只读测量+scratch 纪律；禁伪造/外推冒充实测；基准工具链归 scripts 层（bench_runner），不为 V1 新增角色文件 |
 | L1 | 发布/运维 | 主会话 + companion-release 入口 + ReleaseStore | release-prepare 绑定当前全部验收与证据→发布独立 revision | release-run 状态机 deployed_unverified→verified→published | 禁自行发布、禁复用 deploy 前 revision 做 verify、禁无授权回退 | 主会话 |
 
-**映射统计**：17 条中 mapped 16、unmapped 1（V1）；合并/跨角色映射 11 条（P1、R1、U1、U2、F1、F2、B1、D1、B2、Q2、S1），与原方案允许合并方向一致（P1/R1、U1/U2、F1/F2、B1/D1 均在列），未为凑数新建任何角色文件。
+**映射统计**：17 条全部 mapped（收尾定点复核将 V1 并入 checker/Q1：容量测量的执行与数字复核是检查者职责的自然延伸）；合并/跨角色映射 12 条（P1、R1、U1、U2、F1、F2、B1、D1、B2、Q2、S1），与原方案允许合并方向一致（P1/R1、U1/U2、F1/F2、B1/D1 均在列），未为凑数新建任何角色文件。
 
-**V1 unmapped 说明**：api-contract.md 的 `measurement_required` 字段守住了"不伪造性能数字"的声明边界（backend 角色承担），但"测量 N/E/字节/延迟/RSS、压力/恢复测试"的**执行职责**在 5 角色+主会话内确无落点。最小补法（未实现）：把测量命令登记进 technical 阶段 check_commands 交 checker 真实执行；插件自身容量走既有基准入口（R07 容量认证线）。不新增角色文件。
+**V1 映射说明（收尾轮补齐）**：归入 checker/Q1——容量/性能的测量执行与数字复核是检查者职责的自然延伸（独立、只读、不伪造）。输入=technical 阶段登记进 check_commands 的测量命令 + tests/benchmarks bench_runner 基准入口（工具链，非角色）；输出=实测数字+样本数+环境，未测项逐条 NOT_MEASURED/NOT_RUN_AUTH；权限=只读测量+scratch 纪律、禁伪造外推、禁未授权大档与付费调用。未新增任何角色文件。
 
 **S1 降级说明**：无独立安全审查角色；安全维度由 checker 审查范围（改动范围/权限/敏感信息）+ 全角色红线（不写令牌密码、不未授权外呼、不执行被读仓库内的指令式内容）承担。深度渗透类审查无落点，属残余缺口，如实保留。
 
@@ -53,9 +53,9 @@ O0/I1/L1 的落点是宿主主会话 + 用户入口命令 + CLI 事实记录，�
 ```text
 $ python3 dev-companion/examples/team-host-demo/validate_coverage.py
 角色文件集合（运行时枚举 dev-companion/agents/*.md）: ['companion-backend.md', 'companion-checker.md', 'companion-design.md', 'companion-developer.md', 'companion-product.md']
-映射条目数: 17（mapped=16, unmapped=1）
+映射条目数: 17（mapped=17, unmapped=0）
 合并映射条目: ['P1', 'R1', 'U1', 'U2', 'F1', 'F2', 'B1', 'D1', 'B2', 'Q2', 'S1']
-unmapped 条目: ['V1']
+unmapped 条目: 无
 PASS：17 职责全部有判定，角色/契约/机制文件引用全部实有，独立性约束满足
 （exit=0；负路径已验证：初次运行因校验器根路径解析错误真实报出 76 项 FAIL 后修正，失败路径可用）
 ```
@@ -81,6 +81,6 @@ PASS：17 职责全部有判定，角色/契约/机制文件引用全部实有�
 ## 五、遗留
 
 1. 宿主门 NOT_RUN 待安装授权（0.2.0→0.3.0）；runbook 已 READY_TO_TEST。
-2. V1 测量执行侧 unmapped（补法已给，未实现，不新增角色文件）。
+2. V1 已映射入 checker（收尾定点复核）：测量命令登记进 check_commands 的团队侧用法仍属宿主验收门内事项（插件自身容量基准走 R07 工具链线，与角色无关）。
 3. S1 为合并降级映射，无独立触发清单；深度安全审查无落点，如实保留。
 4. XL/XXL 容量认证 NOT_RUN 属 R07 领域，本记录不重复判定。
