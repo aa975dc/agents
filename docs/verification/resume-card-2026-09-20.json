@@ -1,34 +1,21 @@
 {
-  "kind": "resume_card_pointer_not_runtime_state",
+  "kind": "resume_card_pointer_superseded_by_closure",
   "repo_id": "aa975dc/agents (local: /Users/youxididai/Documents/cj/agents, branch optimization-v1)",
-  "base_commit_or_manifest": "a397ead..f9a9543 (16 commits since baseline 204a9146; see progress-checkpoint-2026-09-20.md for the full list)",
-  "active_store_reference": "docs/verification/progress-checkpoint-2026-09-20.md",
-  "current_phase": "P1-05 H06 E2E (round 5 stopped by provider quota 1310 at G3; fix for the G5 blocker already committed in 1359e6b)",
-  "scope_version": "agents_optimization_v1_20260920",
+  "base_commit_or_manifest": "SUPERSEDED — authoritative progress is now docs/verification/closure-r01-mapping-2026-09-20.md (41-task + 68-spec closure) and docs/verification/final-acceptance-2026-09-20.md",
+  "active_store_reference": "docs/verification/closure-r01-mapping-2026-09-20.md",
+  "current_phase": "closure round (R01-R08) on self-consistent baseline 15df3f2",
+  "scope_version": "agents_optimization_v1_20260920 + agents_v1_closure_review_20260920",
   "source_generation": null,
-  "completed_task_ids": ["P0-01", "P0-02", "P0-03", "P1-01", "P1-02", "P1-03", "P1-04", "P2-01", "P2-02", "P2-03", "P2-04", "P2-05", "P3-01", "P4-01", "P4-02"],
-  "active_attempts": [
-    {
-      "task_id": "P1-05",
-      "what": "H06 real-host E2E round 5",
-      "run_id": "dwfrun-6859f047-0f8d-438a-b984-858c15a7d4b8",
-      "resume": "quota reset 2026-09-23 21:32 -> ResumeWorkflowRun (precheck/G1/G2 replay from journal); if that run is no longer resumable, fresh CreateWorkflow with path=<repo>/code-analysis-swarm/workflow/code-analysis.dwf.ts and args {target:/tmp/h06-fixture, team_root:<repo>/code-analysis-swarm} (AmendWorkflow does NOT inherit args)"
-    },
-    {
-      "task_id": "P3-02",
-      "what": "incremental indexing — partial: packages/agents_kernel/indexing/content_hash.py (124 lines, parses, NO tests) left UNCOMMITTED in working tree; modules.py/edges.py/closure.py + tests not started",
-      "resume": "review/finish content_hash.py, add tests, then modules/edges/closure per original dispatch"
-    }
-  ],
-  "blocked_tasks": ["P3-02 (quota)", "P1-05 H06 final pass (quota)", "P3-03..P7-06 (not started, dependency-gated)"],
-  "next_ready_task_ids": ["P1-05 (H06 finish)", "P3-02 (finish partial)", "P3-03", "P3-05", "P4-03", "P4-04"],
-  "approval_references": ["LICENSE selection = LICENSE_DECISION_REQUIRED (user only)", "no push/no merge to main/no publish (standing instruction)", "quota reset 2026-09-23 21:32:18"],
-  "host_capabilities_reference": "docs/host-contract/host-probe-2026-09-20.md (5 facade constraints + publish boundary + exclusive mkdir, all real-host evidence)",
+  "completed_task_ids": ["NOTE", "the 15/40 and 40-task counts in this card were process-time snapshots with a WRONG denominator (original plan has 41 tasks); do not restore progress from this card"],
+  "active_attempts": [],
+  "blocked_tasks": ["P7-04/Z07 LICENSE (owner decision)", "PK06 install 0.3.0 (authorization)", "SC02-SC04 XL/XXL physical (resource authorization)"],
+  "next_ready_task_ids": [],
+  "approval_references": ["no push/no merge main/no tag/no publish/no install-upgrade (standing)"],
+  "host_capabilities_reference": "docs/host-contract/host-probe-2026-09-20.md",
   "capacity_certifications": {
-    "L": "NOT_RUN",
-    "XL": "NOT_RUN",
-    "XXL": "NOT_RUN"
+    "L": "PASS scan/query/recovery subset (100k files, 238.5MiB, warm); status-on-large-project via CLI entry pending R05; cold-cache NOT_RUN",
+    "XL": "NOT_RUN (implementation + small-sample prep in R07; physical run needs authorization)",
+    "XXL": "NOT_RUN (same)"
   },
-  "test_totals_at_checkpoint": "python unittest 218 OK; node 48 pass (36 mock + 12 guard); vendor manifest synced",
-  "instruction": "从事实Store核对，不从本卡直接恢复accepted或猜测进度；旧进程停止状态必须实际核实。"
+  "instruction": "从事实Store核对，不从本卡直接恢复accepted或猜测进度；本卡仅作历史指针。"
 }
