@@ -33,6 +33,26 @@ argument-hint: "<目标仓库绝对路径> [分析意图]"
 
 使用工作流时机械门禁已实现；手动 SOP 必须使用实际工具检查制品，不声称仅凭类型或提示词已经自动验证。门禁失败按类别处理：schema/覆盖/闭合缺项等可修复问题携带具体失败原因退回同一代理实例，最多初次+2 次修复尝试；路径逃逸、权限、未知副作用或同错复发直接 blocked。仍失败交付 blocked/partial 及证据缺口，不能声明全面分析完成；blocked 时已完成独立验证的 confirmed 发现保留在返回值与"部分完成"报告中，不返回空 findings。
 
+## 中断续接（.code-analysis-resume.json）
+
+运行中断（进程退出、预算暂停、宿主会话结束）后，续接的依据是黑板里由 agents_kernel 续接台账（ResumeLedger）维护的持久事实 `run_root/.code-analysis-resume.json`，不是聊天记忆。登记的活动（campaign 深读 / index_scan 预算扫描 / integration / custom）各自记录检查点路径、schema 版本、source_anchor（被分析仓库 HEAD 或 manifest sha）与状态。续接由新会话显式发起——台账是被动的持久事实，宿主不会自动唤醒，本手册也不承诺自动唤醒。
+
+字段表（台账 JSON）：
+
+| 字段 | 含义 |
+|---|---|
+| `version` / `kind` | 台账格式版本（1）/ 固定 `resume_ledger` |
+| `writer_id` / `writer_epoch` | 当前持有会话与其围栏纪元；新会话打开即接管，epoch+1 |
+| `activities[].kind` | `campaign` / `index_scan` / `integration` / `custom` |
+| `activities[].id` | 活动编号（如 campaign_id） |
+| `activities[].checkpoint_path` | 该活动检查点的绝对路径 |
+| `activities[].schema_version` | 检查点 schema 版本 |
+| `activities[].source_anchor` | 登记时的源锚；`resume_plan` 比对当前锚 |
+| `activities[].status` | `running` / `completed` / `failed`（失败附 `fail_reason`） |
+| `activities[].registered_at` / `heartbeat_at` / `completed_at` / `failed_at` / `note` | 登记与心跳时间线 |
+
+续接流程：新会话以自己的 writer_id 打开台账（接管，旧纪元写入自此被拒，接管事件记于 `resume-takeovers.jsonl`；接管只围栏写入，不宣称旧进程已停止）→ 调 `resume_plan(当前源锚)` 得到每个未完成活动的续接动作。仅 `condition=ok` 的项可按其 `resume_call`（如 `DeepReadCampaign.resume(run_dir=…, campaign_id=…)`、`budget.resume(…)`）续跑，游标以 `cursor_summary` 为准；`condition=broken`（检查点缺失/损坏）与 `stale_anchor`（源锚已变，游标绑定旧 generation）的项如实报告为不可续，需按新锚重建，不得拼旧游标伪装完整结果。台账只经 ResumeLedger 读写，代理不得手改。当前 DWF 仍为一次性执行，工作流内的断点续跑实测归后续任务。
+
 ## 升级与交付
 
 目标不可读、范围需变更或需要执行构建等超出只读权限的动作时，说明具体缺口并请用户决定。构建需要明确授权且在副本进行；本次静态报告不包含构建成功结论。
