@@ -73,7 +73,12 @@ class TeamIdentityTestBase(unittest.TestCase):
 
 class AliasIdentityTests(TeamIdentityTestBase):
     def test_four_aliases_land_on_single_fact_source(self):
-        """绝对/相对(不同 cwd)/末尾斜杠/经 symlink 四种别名 → 同一 team.db、同一事实。"""
+        """绝对/相对(不同 cwd)/末尾斜杠/经 symlink 四种别名 → 同一 team.db、同一事实。
+
+        FIX-04 更新说明：running 不再能对同一任务重复 upsert（白名单 ready→running
+        单向），别名等价性改由每次经 team-task-add 写入一个新任务验证——每次一个
+        事件，generation 仍单调 +1，五次写入终值 6 不变。
+        """
         init = cli_json(self.project, "team-init", "--feature", "login", "登录功能")
         self.assertTrue(init["applied"])
         real_db = self.data / "team.db"
@@ -89,12 +94,12 @@ class AliasIdentityTests(TeamIdentityTestBase):
             ("symlink别名", link, None),
         ]
         expected_store = str(real_db)
-        for label, target, cwd in aliases:
+        for index, (label, target, cwd) in enumerate(aliases):
             view = cli_json(target, "team-status", cwd=cwd)
             self.assertEqual(view["store"], expected_store, "%s：store 应归一到真实路径" % label)
             self.assertEqual([f["feature_id"] for f in view["features"]["items"]], ["login"], label)
-            written = cli_json(target, "team-task", "--set", "t1", "--feature", "login",
-                               "--status", "running", cwd=cwd)
+            written = cli_json(target, "team-task-add", "--set", "t%d" % index,
+                               "--feature", "login", "--kind", "impl", cwd=cwd)
             self.assertTrue(written["applied"], label)
             self.assertEqual(written["generation"], view["generation"] + 1,
                              "%s：写入应落在同一事实源（generation 单调）" % label)
@@ -102,7 +107,8 @@ class AliasIdentityTests(TeamIdentityTestBase):
         final = cli_json(self.project, "team-status")
         self.assertEqual(final["generation"], 6)
         self.assertEqual([(t["task_id"], t["status"]) for t in final["tasks"]["items"]],
-                         [("t1", "running")])
+                         [("t0", "pending"), ("t1", "pending"), ("t2", "pending"),
+                          ("t3", "pending"), ("t4", "pending")])
         # 全程库文件同一个 inode（任何别名都未造出第二个库）
         self.assertEqual(db_inode(real_db), inode_before)
         inventories = sorted(p.name for p in self.data.iterdir())
@@ -157,6 +163,9 @@ class AliasIdentityTests(TeamIdentityTestBase):
                          "store 应归一到真实目录，不出现 symlink 路径")
         self.assertEqual(view["generation"], 1)
         self.assertTrue((real_root / ".dev-companion" / "team.db").is_file())
+        # FIX-04 更新说明：任务先经 team-task-add 创建，ready→running 才合法（SR-01 门禁）
+        cli_json(root_link, "team-task-add", "--set", "t1", "--feature", "login", "--kind", "impl")
+        cli_json(root_link, "team-task", "--set", "t1", "--feature", "login", "--status", "ready")
         written = cli_json(root_link, "team-task", "--set", "t1",
                            "--feature", "login", "--status", "running")
         self.assertTrue(written["applied"])
@@ -254,19 +263,23 @@ class MigratedRollbackTests(RollbackTestBase):
         before = self.legacy_hashes()
         self.migrate()
         cli_json(self.project, "team-init", "--feature", "extra", "迁移后新增功能")
+        # FIX-04 更新说明：任务先经 team-task-add 创建（4 条新事实），ready→running 才合法
+        cli_json(self.project, "team-task-add", "--set", "x1", "--feature", "extra", "--kind", "impl")
+        cli_json(self.project, "team-task", "--set", "x1",
+                 "--feature", "extra", "--status", "ready")
         cli_json(self.project, "team-task", "--set", "x1",
                  "--feature", "extra", "--status", "running")
-        # 无导出 → 拒绝并报出新事实条数（2 条新事件），库原样保留
+        # 无导出 → 拒绝并报出新事实条数（4 条新事件），库原样保留
         failed = cli(self.project, "team-rollback")
         self.assertEqual(failed.returncode, 2)
-        self.assertIn("2 条", failed.stderr)
+        self.assertIn("4 条", failed.stderr)
         self.assertIn("--export-first", failed.stderr)
         self.assertTrue((self.data / "team.db").exists())
         # --export-first → 先导出全量事实再回退
         out_dir = self.base / "facts-export"
         report = cli_json(self.project, "team-rollback", "--export-first", str(out_dir))
         self.assertEqual(report["status"], "rolled_back")
-        self.assertEqual(report["at_risk_events"], 2)
+        self.assertEqual(report["at_risk_events"], 4)
         self.assertEqual(self.legacy_hashes(), before, "回退不得改动 legacy JSON")
         self.assertEqual(self.team_files(), [])
         # 导出含新增任务：全量事件日志里有 extra 的 feature_status/task_status 事件

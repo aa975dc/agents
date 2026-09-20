@@ -84,17 +84,26 @@ class TeamEntryTestBase(unittest.TestCase):
 
 class NewTeamProjectTests(TeamEntryTestBase):
     def test_facts_roundtrip_across_processes_and_single_source(self):
-        """scratch 项目：init→task→新进程 status 读到同一事实；事实源唯一。"""
+        """scratch 项目：init→add→task→新进程 status 读到同一事实；事实源唯一。
+
+        FIX-04 更新说明：team-task 不再从任意状态凭空造任务（SR-01 门禁），
+        先经 team-task-add 显式创建（pending），再按白名单 ready→running；
+        generation 相应从 3 变 5。
+        """
         report = cli_json("--project", str(self.project), "team-init", "--feature", "login", "登录功能")
         self.assertTrue(report["applied"])
         cli_json("--project", str(self.project), "team-init", "--feature", "report", "报表功能")
+        cli_json("--project", str(self.project), "team-task-add", "--set", "t1",
+                 "--feature", "login", "--kind", "impl")
+        cli_json("--project", str(self.project), "team-task",
+                 "--set", "t1", "--feature", "login", "--status", "ready")
         set_report = cli_json("--project", str(self.project), "team-task",
                               "--set", "t1", "--feature", "login", "--status", "running")
         self.assertTrue(set_report["applied"])
         # 全新的 Python 进程只从 team.db 读回事实
         view = cli_json("--project", str(self.project), "team-status")
         self.assertEqual(view["store"], str(self.data / "team.db"))
-        self.assertEqual(view["generation"], 3)
+        self.assertEqual(view["generation"], 5)
         self.assertEqual([(f["feature_id"], f["status"]) for f in view["features"]["items"]],
                          [("login", "draft"), ("report", "draft")])
         self.assertEqual([(t["task_id"], t["status"]) for t in view["tasks"]["items"]],
@@ -125,21 +134,24 @@ class NewTeamProjectTests(TeamEntryTestBase):
         self.assertFalse((scratch / ".dev-companion" / "team.db").exists())
 
     def test_task_cas_conflict_rejected_and_unknown_feature_refused(self):
+        """CAS 冲突与未登记功能拒绝（FIX-04 更新：done 现在走门禁，改用 ready 触发
+        CAS——pending→ready 是合法转换，门禁放行后由 CAS 拒绝；done 的门禁拒绝
+        另有专项断言，见 test_fix04_gates.py）。"""
         cli_json("--project", str(self.project), "team-init", "--feature", "login", "登录功能")
         view = cli_json("--project", str(self.project), "team-status")
         stale = view["generation"]
-        cli_json("--project", str(self.project), "team-task", "--set", "t1",
-                 "--feature", "login", "--status", "running", "--expect-seq", str(stale))
-        # 用同一旧 generation 再写 → CAS 冲突，exit 2 且事实不变
+        cli_json("--project", str(self.project), "team-task-add", "--set", "t1",
+                 "--feature", "login", "--kind", "impl")
+        # 用 add 之前的旧 generation 写 ready → 门禁放行但 CAS 冲突，exit 2 且事实不变
         failed = cli("--project", str(self.project), "team-task", "--set", "t1",
-                     "--feature", "login", "--status", "done", "--expect-seq", str(stale))
+                     "--feature", "login", "--status", "ready", "--expect-seq", str(stale))
         self.assertEqual(failed.returncode, 2)
         self.assertIn("CAS", failed.stderr)
         view = cli_json("--project", str(self.project), "team-status")
-        self.assertEqual(view["tasks"]["items"][0]["status"], "running")
-        # 未登记的 feature 拒绝挂任务
-        failed = cli("--project", str(self.project), "team-task", "--set", "t2",
-                     "--feature", "nope", "--status", "ready")
+        self.assertEqual(view["tasks"]["items"][0]["status"], "pending")
+        # 未登记的 feature 拒绝挂任务（创建入口校验功能存在）
+        failed = cli("--project", str(self.project), "team-task-add", "--set", "t2",
+                     "--feature", "nope", "--kind", "impl")
         self.assertEqual(failed.returncode, 2)
         self.assertIn("team-init", failed.stderr)
 
@@ -197,6 +209,11 @@ class NoDualMasterTests(TeamEntryTestBase):
         doctor_before = cli("--project", str(self.project), "doctor")
         self.assertEqual(status_before.returncode, 0)
         cli_json("--project", str(self.project), "team-init", "--feature", "extra", "并行新功能")
+        # FIX-04 更新说明：任务先经 team-task-add 显式创建，ready→running 才合法（SR-01 门禁）
+        cli_json("--project", str(self.project), "team-task-add", "--set", "x1",
+                 "--feature", "extra", "--kind", "impl")
+        cli_json("--project", str(self.project), "team-task", "--set", "x1",
+                 "--feature", "extra", "--status", "ready")
         cli_json("--project", str(self.project), "team-task", "--set", "x1",
                  "--feature", "extra", "--status", "running")
         status_after = cli("--project", str(self.project), "status", "--format", "json")

@@ -128,7 +128,8 @@ class TaskBoard:
 
     # ---- Task ----
 
-    def add_task(self, task_id, feature_id, kind, depends_on=(), priority=0):
+    def add_task(self, task_id, feature_id, kind, depends_on=(), priority=0,
+                 allowed_paths=()):
         tid = text(task_id, "任务编号")
         if tid in self._tasks:
             raise CompanionError("任务编号已存在：%s" % tid)
@@ -143,12 +144,33 @@ class TaskBoard:
         for dep in deps:
             if dep not in self._tasks:
                 raise CompanionError("依赖任务不存在：%s → %s" % (tid, dep))
+        paths = [relative_path(p) for p in list(allowed_paths)]
         entry = {"id": tid, "feature_id": text(feature_id, "所属功能"), "kind": kind,
-                 "depends_on": deps, "priority": priority, "status": "pending",
+                 "depends_on": deps, "priority": priority,
+                 "allowed_paths": list(dict.fromkeys(paths)), "status": "pending",
                  "block_reason": None, "blocked_by": []}
         self._tasks[tid] = entry
         self._attempts[tid] = []
         return self.task(tid)
+
+    def adopt_task(self, task_id, feature_id, kind, depends_on=(), priority=0,
+                   allowed_paths=(), status="pending", block_reason=None,
+                   blocked_by=()):
+        """回放/迁移专用：按已落库的历史事实登记任务，不做白名单重审。
+
+        门禁只约束新写入；事件库里既存状态（迁移导入的直接 done/running、无
+        attempt 记录的历史事实）原样重建——否则历史无法重放进台账，门禁前置
+        查询会把合法历史误判为违规。仅 storage.team 事件回放调用。
+        """
+        entry = self.add_task(task_id, feature_id, kind, depends_on=depends_on,
+                              priority=priority, allowed_paths=allowed_paths)
+        if status not in TASK_STATUSES:
+            raise CompanionError("未知任务状态：%s" % status)
+        raw = self._tasks[entry["id"]]
+        raw["status"] = status
+        raw["block_reason"] = block_reason
+        raw["blocked_by"] = list(blocked_by)
+        return self.task(entry["id"])
 
     def task(self, tid):
         entry = self._tasks.get(text(tid, "任务编号"))
@@ -156,6 +178,7 @@ class TaskBoard:
             raise CompanionError("任务不存在：%s" % tid)
         entry = dict(entry)
         entry["blocked_by"] = list(entry["blocked_by"])
+        entry["allowed_paths"] = list(entry["allowed_paths"])
         return entry
 
     def tasks(self):

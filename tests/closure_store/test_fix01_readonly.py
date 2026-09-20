@@ -66,8 +66,14 @@ class Fix01ReadOnlyTests(unittest.TestCase):
         self.db = self.data / "team.db"
 
     def seed_store(self):
-        """正常初始化一个 team 库并写入一条任务事实（写入口既有语义）。"""
+        """正常初始化一个 team 库并写入一条任务事实（写入口既有语义）。
+
+        FIX-04 更新说明：running 前须显式 team-task-add（SR-01 门禁：任务存在才可派发）。
+        """
         cli_json(self.project, "team-init", "--feature", "login", "登录功能")
+        cli_json(self.project, "team-task-add", "--set", "t1", "--feature", "login",
+                 "--kind", "impl")
+        cli_json(self.project, "team-task", "--set", "t1", "--feature", "login", "--status", "ready")
         cli_json(self.project, "team-task", "--set", "t1",
                  "--feature", "login", "--status", "running")
 
@@ -174,7 +180,13 @@ class Fix01ReadOnlyTests(unittest.TestCase):
         self.assertEqual(sha256(self.db), hash_before, "未知版本库被改写")
 
     def test_normal_read_write_unaffected_and_status_leaves_no_trace(self):
-        """(f) 正常项目读写不回归；team-status 前后目录清单与库哈希不变（只读铁证）。"""
+        """(f) 正常项目读写不回归；team-status 前后目录清单与库哈希不变（只读铁证）。
+
+        FIX-04 更新说明：写入口语义保持，但 t2 的完成走合法门禁链
+        （add→ready→running→report→done，review_required 缺省关，无需批准）——
+        直接把新任务 upsert 成 done 已被 SR-01 门禁拒绝；generation 增量 1→5
+        （add/ready/running/report/done 各一事件）。
+        """
         self.seed_store()
         view_before = cli_json(self.project, "team-status")
         self.assertEqual([(t["task_id"], t["status"]) for t in view_before["tasks"]["items"]],
@@ -188,13 +200,27 @@ class Fix01ReadOnlyTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.data.iterdir()), inventory,
                          "team-status 改动了记录目录（journal/WAL/锁残留）")
         self.assertEqual(sha256(self.db), hash_before, "team-status 改写了库文件")
-        # 写入口既有语义保持：新任务照常落库并被只读 status 读到
-        cli_json(self.project, "team-task", "--set", "t2",
-                 "--feature", "login", "--status", "done")
+        # 写入口既有语义保持：合法门禁链完成任务并落完成证据
+        cli_json(self.project, "team-task-add", "--set", "t2", "--feature", "login", "--kind", "impl")
+        cli_json(self.project, "team-task", "--set", "t2", "--feature", "login", "--status", "ready")
+        cli_json(self.project, "team-task", "--set", "t2", "--feature", "login", "--status", "running")
+        sha = hashlib.sha256(b"t2-deliverable").hexdigest()
+        cli_json(self.project, "team-report", "--task", "t2", "--outcome", "succeeded",
+                 "--summary", "完成", "--changed-files", "b.py", "--artifact-sha256", sha)
+        cli_json(self.project, "team-task", "--set", "t2", "--feature", "login", "--status", "done")
         view = cli_json(self.project, "team-status")
         self.assertEqual([(t["task_id"], t["status"]) for t in view["tasks"]["items"]],
                          [("t1", "running"), ("t2", "done")])
-        self.assertEqual(view["generation"], view_before["generation"] + 1)
+        # done 动作 = 状态事件 + 完成证据事件（同事务两条），增量 4 条链 + 2 = 6
+        self.assertEqual(view["generation"], view_before["generation"] + 6)
+        # 完成证据与 done 同事务折叠（SR-01 (d)：evidence_view 必须有行）
+        import sqlite3
+        conn = sqlite3.connect("file:%s?mode=ro" % self.db, uri=True)
+        try:
+            rows = conn.execute("SELECT evidence_id FROM evidence_view").fetchall()
+        finally:
+            conn.close()
+        self.assertIn(("task:t2",), rows)
 
 
 if __name__ == "__main__":

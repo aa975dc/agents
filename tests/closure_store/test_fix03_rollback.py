@@ -117,15 +117,30 @@ class Fix03RollbackBase(unittest.TestCase):
 class Sr04ReplayTests(Fix03RollbackBase):
     def test_rollback_after_new_facts_exports_everything_and_draft_loads(self):
         """SR-04 场景完整重放：legacy→migrate→新增子任务→原任务 done→rollback
-        --export-first，逐项断言复核报告的四个缺陷全部闭合。"""
+        --export-first，逐项断言复核报告的四个缺陷全部闭合。
+
+        FIX-04 更新说明：新增子任务经 team-task-add 创建（任意 upsert 已被 SR-01
+        门禁拒绝）；原任务 sum（迁移导入为 pending）按真实门禁链推到 done——
+        复核报告 §7 预言"修复 SR-01 后合法完成的任务仍会产生 done"，这里顺带
+        验证该路径的导出映射。新增的团队事实事件数随之变化，回退 at-risk 计数
+        不在断言内（由 test_rollback_with_new_writes 专项覆盖）。
+        """
         self.build_legacy()
         before = self.legacy_hashes()
         cli_json(self.project, "team-migrate", "--from-json")
         # 迁移后新增子任务（挂在已有功能 sum 下）+ 原任务推进为 done + 一条 review 证据
+        cli_json(self.project, "team-task-add", "--set", "new-after-migration",
+                 "--feature", "sum", "--kind", "impl")
         cli_json(self.project, "team-task", "--set", "new-after-migration",
                  "--feature", "sum", "--status", "ready")
-        cli_json(self.project, "team-task", "--set", "sum",
-                 "--feature", "sum", "--status", "done")
+        cli_json(self.project, "team-task", "--set", "sum", "--feature", "sum", "--status", "ready")
+        cli_json(self.project, "team-task", "--set", "sum", "--feature", "sum", "--status", "running")
+        import hashlib
+        sha = hashlib.sha256(b"sum-deliverable").hexdigest()
+        cli_json(self.project, "team-report", "--task", "sum", "--outcome", "succeeded",
+                 "--summary", "迁移前功能合法完成", "--changed-files", "ledger.py",
+                 "--artifact-sha256", sha)
+        cli_json(self.project, "team-task", "--set", "sum", "--feature", "sum", "--status", "done")
         self.register_review_evidence("sum", "review:sum")
 
         # 无导出 → 拒绝回退，活动库与 legacy 原件原样保留（断言 e）
@@ -164,9 +179,11 @@ class Sr04ReplayTests(Fix03RollbackBase):
         self.assertIn("awaiting_review", warnings)
         self.assertIn("done", warnings)
 
-        # (d) sidecar 含审查等不可映射事实原件
-        self.assertEqual([e["evidence_id"] for e in sidecar["evidence"]], ["review:sum"])
-        self.assertEqual(sidecar["evidence"][0]["review"]["passed"], True)
+        # (d) sidecar 含审查等不可映射事实原件（FIX-04 更新：sum 的合法回报证据
+        # report:sum#1 同样不可映射，按事件顺序一并入 sidecar）
+        self.assertEqual([e["evidence_id"] for e in sidecar["evidence"]],
+                         ["report:sum#1", "review:sum"])
+        self.assertEqual(sidecar["evidence"][-1]["review"]["passed"], True)
 
         # (c) 旧格式草稿过真实 legacy Project.load；done 未变成 accepted
         state = self.load_draft_with_real_legacy(out_dir)
@@ -178,7 +195,13 @@ class Sr04ReplayTests(Fix03RollbackBase):
         self.assertEqual(self.legacy_hashes(), before, "回退不得改动 legacy 原件")
 
     def test_status_mapping_table_covers_all_team_statuses(self):
-        """映射决策表端到端：每个功能一种团队状态，导出草稿逐一断言 legacy 状态与警告。"""
+        """映射决策表端到端：每个功能一种团队状态，导出草稿逐一断言 legacy 状态与警告。
+
+        FIX-04 更新说明：p1..p7 已随迁移导入为 pending 任务，不能再 add（编号已存在）；
+        各状态改经合法动作链构造——p2=ready、p3=ready+running、p4=完整链到 done
+        （合法完成仍产生 done，导出映射不变）、p5=running+failed(--reason)、
+        p6=blocked(--reason)、p7=cancelled(--reason)。导出映射表与警告断言原样保留。
+        """
         statuses = {"p1": "pending", "p2": "ready", "p3": "running", "p4": "done",
                     "p5": "failed", "p6": "blocked", "p7": "cancelled"}
         scope = {"title": "映射表", "goal": "验证映射", "audience": "测试", "scenario": "单测",
@@ -191,9 +214,24 @@ class Sr04ReplayTests(Fix03RollbackBase):
         cli_json(self.project, "init", "--input", str(scope_path))
         cli_json(self.project, "confirm", "--revision", "1")
         cli_json(self.project, "team-migrate", "--from-json")
-        for fid, status in statuses.items():
-            cli_json(self.project, "team-task", "--set", fid,
-                     "--feature", fid, "--status", status)
+        cli_json(self.project, "team-task", "--set", "p2", "--feature", "p2", "--status", "ready")
+        cli_json(self.project, "team-task", "--set", "p3", "--feature", "p3", "--status", "ready")
+        cli_json(self.project, "team-task", "--set", "p3", "--feature", "p3", "--status", "running")
+        cli_json(self.project, "team-task", "--set", "p4", "--feature", "p4", "--status", "ready")
+        cli_json(self.project, "team-task", "--set", "p4", "--feature", "p4", "--status", "running")
+        import hashlib
+        sha = hashlib.sha256(b"p4-deliverable").hexdigest()
+        cli_json(self.project, "team-report", "--task", "p4", "--outcome", "succeeded",
+                 "--summary", "完成", "--changed-files", "a.txt", "--artifact-sha256", sha)
+        cli_json(self.project, "team-task", "--set", "p4", "--feature", "p4", "--status", "done")
+        cli_json(self.project, "team-task", "--set", "p5", "--feature", "p5", "--status", "ready")
+        cli_json(self.project, "team-task", "--set", "p5", "--feature", "p5", "--status", "running")
+        cli_json(self.project, "team-task", "--set", "p5", "--feature", "p5",
+                 "--status", "failed", "--reason", "回归失败")
+        cli_json(self.project, "team-task", "--set", "p6", "--feature", "p6",
+                 "--status", "blocked", "--reason", "等待上游")
+        cli_json(self.project, "team-task", "--set", "p7", "--feature", "p7",
+                 "--status", "cancelled", "--reason", "范围裁剪")
         out_dir = self.base / "mapping-export"
         report = cli_json(self.project, "team-rollback", "--export-first", str(out_dir))
         state = self.load_draft_with_real_legacy(out_dir)
@@ -204,9 +242,11 @@ class Sr04ReplayTests(Fix03RollbackBase):
         warnings = "\n".join(report["export"]["warnings"])
         for fid in ("p2", "p3", "p4", "p5", "p7"):  # 非恒等映射逐条有警告
             self.assertIn(fid, warnings)
-        # 全部同 id 任务都可映射 → 无不可映射事实，sidecar 不产出
-        self.assertIsNone(report["export"]["sidecar"])
-        self.assertFalse((out_dir / "team_sidecar.json").exists())
+        # FIX-04 更新说明：p4 经 team-report 回报后完成，回报证据（kind=check）旧
+        # schema 无法表达 → 进 sidecar（不静默丢弃）；同 id 任务状态仍全部可映射
+        sidecar = json.loads((out_dir / "team_sidecar.json").read_text(encoding="utf-8"))
+        self.assertEqual([e["evidence_id"] for e in sidecar["evidence"]],
+                         ["report:p4#1"])
 
 
 if __name__ == "__main__":

@@ -13,3 +13,7 @@ skills: dev-companion
 5. 通过检查后按 `companion-check` 提供真实试用并验收，不替用户填写试用结果。每轮读取状态；在未决问题存在时继续不依赖它的已授权工作。
 
 交付实际文件、检查证据和明确限制；不能只产任务包就称完成。需要新文件或新检查方法时更新范围，不能直接编辑事实记录。功能全部验收后按既有发布意图转交 `companion-release` 准备具体发布计划。
+
+## team 模式检测与路由
+
+项目根 `.dev-companion/team.db` 存在且无旧 `state.json` 时，本入口改走团队门禁动作，不再走 packet/receipt 串行：`team-task-add` 为每个并行任务创建条目（`--kind`、`--depends-on`、文件级 `--allowed-paths` 精确清单，两个任务互不相交）→ `team-task --status ready` 派发 → `--status running` 开始（自动建 attempt）→ worker 产出后 `team-report`（附产出固定 `--artifact-sha256` 与 `--changed-files`）→ 另起独立审查者 `team-approve`（实现者自审会被拒）→ `team-task --status done`（门禁校验 attempt+回报+批准+证据，缺什么会明确报出）→ 全部 done 后 `team-integrate --check-cmd <真实回归命令>`。禁止手写 done、禁止用任意 `--status` 模拟完成；`done→ready` 等非法转换直接拒绝。packet/receipt 仅用于无 team.db 的 legacy 项目。

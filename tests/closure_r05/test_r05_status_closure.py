@@ -131,6 +131,9 @@ class TeamStatusReadsOnlyFactStore(CliProjectCase):
             (project / ("src_%d.py" % index)).write_text("X = %d\n" % index)
         run_ok(cli(project, "team-init", "--feature", "core", "核心功能"))
         for index in range(5):
+            # FIX-04 更新说明：ready 前须显式 team-task-add（SR-01 门禁：任务存在才可派发）
+            run_ok(cli(project, "team-task-add", "--set", "t%d" % index,
+                       "--feature", "core", "--kind", "impl"))
             run_ok(cli(project, "team-task", "--set", "t%d" % index,
                        "--feature", "core", "--status", "ready"))
         argv = cli(project, "team-status", "--offset", "0", "--limit", "3")

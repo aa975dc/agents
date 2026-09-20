@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T18:22:01+00:00",
+  "generated_at": "2026-09-20T19:21:30+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "174d9d62873780e45396b44d7c9408dad4433847"
+    "commit": "9559b93b477d32c80ac89cc474aa8eab1ea43354"
   },
   "target": {
     "plugin": "dev-companion",
@@ -57,8 +57,8 @@
     },
     {
       "path": "agents_kernel/domain/tasks.py",
-      "sha256": "9b6d40c91c4cb98fb259e25fcce925f9246c351ceb76ac5add5edace3c23e9d0",
-      "bytes": 12607
+      "sha256": "3f4be96e0cf433bad46b8ba8061454c91e6686fe4675f880ec1b2ca46bf43ab1",
+      "bytes": 13894
     },
     {
       "path": "agents_kernel/domain/views.py",
@@ -262,8 +262,8 @@
     },
     {
       "path": "agents_kernel/storage/team.py",
-      "sha256": "c0a03e8e9ab923908439e4931d3158cc088cc7bccc7cfcf07444a253fe04473d",
-      "bytes": 16929
+      "sha256": "56d7e51f2d8c749c03c5ce97d6ac9a69ad9c5a1e2a767806ae12cb661be6e296",
+      "bytes": 64317
     },
     {
       "path": "agents_kernel/validation.py",

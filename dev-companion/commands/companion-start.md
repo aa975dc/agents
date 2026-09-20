@@ -15,3 +15,7 @@ skills: dev-companion
 原型必须有真实可打开产物和可核对 walkthrough；无界面项目提供实际模块操作样例并说明。不要把一句总结或想象的用户试用当成果。问题、建议、假设各记来源；上游修改后复查失效的下游记录。
 
 六阶段完成后使用 technical 的完整 scope 建立或更新功能台账，再按已有授权调用 `confirm`。用户已授权实施时进入 `companion-work`，只要求规划时交付当前成果。说明当前阶段与仍缺内容，不把规划完成当作软件完成。
+
+## team 模式检测与路由
+
+项目根 `.dev-companion/team.db` 已存在（且无旧 `state.json`）说明这是团队项目：不要引导重新 init，直接续接——`status` 返回团队聚合视图，`resume` 给出门禁续接清单。需要为团队项目登记新功能时用 `team-init --feature ID --review-required 标题`（review_required 开启后该功能的实现任务 done 前必须过独立审查门），再用 `team-task-add` 建任务；不要把六阶段规划输入塞给 team-init，也不要对无 team.db 的项目预先创建 team.db。
