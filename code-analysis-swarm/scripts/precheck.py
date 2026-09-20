@@ -18,6 +18,13 @@ stdout 恒为单行 JSON；错误输出只含路径与原因，不含密钥、�
               否则 exit 3，错误回执含 missing 数组（Z11 制品存在性核验）。
   read-report 校验报告文件真实存在（普通文件、位于 within_root 内、大小合规），
               输出 size/sha256/正文/publish_relpath。
+  claims-write校验送验结论清单（id/claim/source_role 非空、evidence_refs 非空数组、
+              id 唯一）后写入 run_root/verification/claims.json（C10：全量 claims
+              先落盘，供 A6 分页领取；协调者不把全部 claims stringify 进 prompt）。
+  claims-page 从 run_root 内的 claims 分页文件有界读取一页：
+              --json {within_root, claims_file, page, page_size} →
+              {ok, total, pages, page, page_size, claims}；越界页/非法 page_size
+              拒绝（exit 2），文件越界/缺失拒绝（exit 3），复用 read-report 校验风格。
 
 退出码：0 成功；2 参数/输入无效；3 目录关系冲突或排他创建失败；4 敏感路径。
 """
@@ -40,6 +47,9 @@ KIND_CONFLICT = "conflict"
 KIND_SENSITIVE = "sensitive"
 
 MAX_REPORT_BYTES = 200_000
+MAX_CLAIMS_BYTES = 20_000_000
+DEFAULT_CLAIM_PAGE_SIZE = 80
+MAX_CLAIM_PAGE_SIZE = 500
 DEFAULT_RUNS_DIRNAME = ".code-analysis-swarm-runs"
 RUN_ID_MAX = 80
 
@@ -319,12 +329,95 @@ def cmd_check_files(payload):
     emit({"ok": True, "files": files})
 
 
+def validate_claims(claims):
+    """C10 送验结论 schema：id/claim/source_role 非空、evidence_refs 非空字符串数组、id 唯一。"""
+    if not isinstance(claims, list) or not claims:
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, "claims 必须是非空数组")
+    seen = set()
+    for claim in claims:
+        if not isinstance(claim, dict):
+            fail(EXIT_ARGUMENT, KIND_ARGUMENT, "claims 元素必须是对象")
+        for key in ("id", "claim", "source_role"):
+            value = claim.get(key)
+            if not isinstance(value, str) or not value.strip():
+                fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"结论缺少非空 {key}")
+        refs = claim.get("evidence_refs")
+        if not isinstance(refs, list) or not refs \
+                or not all(isinstance(r, str) and r.strip() for r in refs):
+            fail(EXIT_ARGUMENT, KIND_ARGUMENT, "结论 evidence_refs 必须是非空字符串数组")
+        if claim["id"] in seen:
+            fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"结论 ID 重复：{claim['id']}")
+        seen.add(claim["id"])
+    return claims
+
+
+def cmd_claims_write(payload):
+    run_root = os.path.realpath(require_string(payload, "run_root"))
+    claims = validate_claims(payload.get("claims"))
+    if not os.path.isdir(run_root):
+        fail(EXIT_CONFLICT, KIND_CONFLICT, f"run_root 不是现有目录：{run_root}")
+    hit = sensitive_component(run_root)
+    if hit:
+        fail(EXIT_SENSITIVE, KIND_SENSITIVE, f"run_root 位于敏感目录 {hit} 内，拒绝写入")
+    body = json.dumps(claims, ensure_ascii=False, indent=2) + "\n"
+    if len(body.encode("utf-8")) > MAX_CLAIMS_BYTES:
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"claims 超过 {MAX_CLAIMS_BYTES} 字节上限")
+    claims_path = os.path.join(run_root, "verification", "claims.json")
+    try:
+        os.makedirs(os.path.dirname(claims_path), exist_ok=True)
+        with open(claims_path, "w", encoding="utf-8") as fh:
+            fh.write(body)
+    except OSError as exc:
+        fail(EXIT_CONFLICT, KIND_CONFLICT, f"claims 写入失败 {claims_path}：{exc.strerror or exc}")
+    emit({"ok": True, "claims_file": claims_path, "total": len(claims),
+          "page_size_default": DEFAULT_CLAIM_PAGE_SIZE})
+
+
+def cmd_claims_page(payload):
+    run_root = os.path.realpath(require_string(payload, "within_root"))
+    claims_file = os.path.realpath(require_string(payload, "claims_file"))
+    if not is_inside(claims_file, run_root):
+        fail(EXIT_CONFLICT, KIND_CONFLICT, f"claims 文件不在 run_root 内：{claims_file}")
+    if not os.path.isfile(claims_file):
+        fail(EXIT_CONFLICT, KIND_CONFLICT, f"claims 不是现有普通文件：{claims_file}")
+    page = payload.get("page")
+    if not isinstance(page, int) or isinstance(page, bool) or page < 0:
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, "page 必须是非负整数")
+    page_size = payload.get("page_size")
+    if not isinstance(page_size, int) or isinstance(page_size, bool) \
+            or not 1 <= page_size <= MAX_CLAIM_PAGE_SIZE:
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"page_size 必须在 1..{MAX_CLAIM_PAGE_SIZE}")
+    try:
+        with open(claims_file, "rb") as fh:
+            raw = fh.read(MAX_CLAIMS_BYTES + 1)
+    except OSError as exc:
+        fail(EXIT_CONFLICT, KIND_CONFLICT, f"claims 无法读取 {claims_file}：{exc.strerror or exc}")
+    if len(raw) > MAX_CLAIMS_BYTES:
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"claims 超过 {MAX_CLAIMS_BYTES} 字节上限：{claims_file}")
+    try:
+        claims = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"claims 不是有效 UTF-8 JSON：{claims_file}")
+    if not isinstance(claims, list):
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT, f"claims 文件内容不是数组：{claims_file}")
+    pages = (len(claims) + page_size - 1) // page_size
+    if page >= pages:
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT,
+             f"page {page} 越界：共 {pages} 页 {len(claims)} 条",
+             {"pages": pages, "total": len(claims)})
+    start = page * page_size
+    emit({"ok": True, "claims_file": claims_file, "total": len(claims), "pages": pages,
+          "page": page, "page_size": page_size, "claims": claims[start:start + page_size]})
+
+
 COMMANDS = {
     "plan": cmd_plan,
     "acquire": cmd_acquire,
     "verify": cmd_verify,
     "check-files": cmd_check_files,
     "read-report": cmd_read_report,
+    "claims-write": cmd_claims_write,
+    "claims-page": cmd_claims_page,
 }
 
 
@@ -352,7 +445,9 @@ def load_payload(options):
 
 def main(argv):
     if len(argv) < 1 or argv[0] not in COMMANDS:
-        fail(EXIT_ARGUMENT, KIND_ARGUMENT, "用法：precheck.py plan|acquire|verify|check-files|read-report (--json <JSON>|--json-file <路径>)")
+        fail(EXIT_ARGUMENT, KIND_ARGUMENT,
+             "用法：precheck.py plan|acquire|verify|check-files|read-report|claims-write|claims-page"
+             " (--json <JSON>|--json-file <路径>)")
     options, i = {}, 1
     while i < len(argv):
         flag = argv[i]

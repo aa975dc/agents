@@ -148,6 +148,9 @@ function claimsValid(claims: Claim[]) {
 //   硬阻断（路径逃逸/权限/未知副作用等普通 Error，或与上一次完全相同的失败复发）→ 立即抛出 blocked。
 // askBudget/lastFailure 按代理名全局记账：同一实例的修复尝试不因换闸门而重置额度。
 const MAX_REPAIRS = 2;
+// C10/CV01：送验结论分页领取的批次大小。全量 claims 原文先经 precheck claims-write
+// 落盘，A6 用 precheck claims-page 逐批领取复核，禁止把全部 claims stringify 进 prompt。
+const CLAIM_PAGE_SIZE = 80;
 // 宿主禁止对 agent 取引用（含 typeof），也禁止重定型为本地结构接口（逃逸站点标识）；
 // 缓存必须以 facade 自己的 Agent 接口类型持有，ask 调用点才可被日志/重放定位。
 const actorCache = new Map<string, Agent>();
@@ -414,6 +417,15 @@ try {
     ...findings.filter(f => f.severity === "high").map(f => ({ id: `finding:${f.id}`, claim: `${f.what}（${f.where}）`, source_role: "A2", evidence_refs: [f.where, f.evidence] })),
   ];
   claimsValid(toVerify);
+  // C10/CV01：全量 claims 原文不再 stringify 进 prompt——先经 helper 落盘为分页文件，
+  // A6 用 claims-page 子命令逐批领取、复核全部批；严禁限取前 N 条的约束改为
+  // "批数有限、逐批领取、禁止跳批"，闸门仍按全部 claim ID sameSet 闭合。
+  const claimsWrite = await world.run("python3", [helperPath, "claims-write", "--json", JSON.stringify({ run_root: board, claims: toVerify })]);
+  requireThat(claimsWrite.exitCode === 0, `送验结论落盘失败（exit ${claimsWrite.exitCode}）：${diag(claimsWrite)}`);
+  const claimsReceipt = JSON.parse(claimsWrite.stdout);
+  requireThat(claimsReceipt?.ok === true && claimsReceipt.total === toVerify.length && nonempty(claimsReceipt.claims_file), "送验结论落盘回执无效");
+  const claimsFile = claimsReceipt.claims_file;
+  const claimPages = Math.ceil(toVerify.length / CLAIM_PAGE_SIZE);
   function validateVerdicts(vs: Verdict[]): void {
     list(vs, "verdicts");
     sameSet(vs.map(v => v.claim_id), toVerify.map(c => c.id), "送验结论与 verdict");
@@ -423,9 +435,11 @@ try {
     }
   }
   const { verdicts } = await askGate<VerdictBundle>("交叉验证员·铁证如", feedback => actorFor("交叉验证员·铁证如").ask<VerdictBundle>([
-    `先读 ${ROLE}/a6-verifier.md。目标 ${JSON.stringify(target)}；逐条复查全部结论 ${JSON.stringify(toVerify)}。`,
+    `先读 ${ROLE}/a6-verifier.md。目标 ${JSON.stringify(target)}。`,
+    `送验结论共 ${toVerify.length} 条、分 ${claimPages} 批（每批 ≤${CLAIM_PAGE_SIZE} 条），原文已落盘 ${claimsFile}。逐批领取并复查：python3 ${helperPath} claims-page --json '{"within_root":${JSON.stringify(board)},"claims_file":${JSON.stringify(claimsFile)},"page":N,"page_size":${CLAIM_PAGE_SIZE}}'（page 取 0 到 ${claimPages - 1}）；禁止跳批、禁止限取前 N 条，全部 ${claimPages} 批处理完才可返回，不抽样不降级。`,
+    `送验 ID 清单（每个 ID 恰好一个 verdict）：${JSON.stringify(toVerify.map(c => c.id))}。`,
     `写 ${board}/verification/verdicts.json，返回 {verdicts:[{claim_id,verdict,note,own_evidence}]}。`,
-    "独立读取与复查，不接收原完整论证。confirmed/refuted 均须自己的非空证据；无法复查用 unverified 并说明原因，不能当作 refuted。严禁限取前 N 条。",
+    "独立读取与复查，不接收原完整论证。confirmed/refuted 均须自己的非空证据；无法复查用 unverified 并说明原因，不能当作 refuted。",
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 verdicts：\n- ${feedback.split("\n").join("\n- ")}` : "",
   ].filter(Boolean).join("\n")), v => validateVerdicts(v.verdicts));
   const confirmed = verdicts.filter(v => v.verdict === "confirmed").length;
