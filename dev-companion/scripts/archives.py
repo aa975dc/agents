@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import kernel_bootstrap  # noqa: F401 — P2-05 单处引导：优先本目录 _kernel_vendor，回退仓库 packages/
 
 
-from agents_kernel.atomicio import read_json, write_atomic
+from agents_kernel.atomicio import fsync_directory, read_json, write_atomic
 from agents_kernel.digest import canonical_bytes, sha256_bytes
 from agents_kernel.paths import SENSITIVE_NAMES, SENSITIVE_PREFIXES, SENSITIVE_SUFFIXES, absolute, realpath
 
@@ -342,6 +342,8 @@ class ArchiveStore:
         if entry is None:
             if path.exists():
                 path.unlink()
+                # Z23尾/FS07：删除同样是目录项变更，尽力 fsync 父目录使恢复持久。
+                fsync_directory(path.parent)
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         self._project_path(name)
@@ -356,6 +358,9 @@ class ArchiveStore:
                 os.fchmod(out.fileno(), entry["mode"])
             self._project_path(name)
             os.replace(temporary, path)
+            # Z23尾/FS07：与 kernel write_atomic 同口径，replace 后尽力 fsync 父目录；
+            # Windows 等不支持目录 fsync 的平台由 fsync_directory 静默跳过。
+            fsync_directory(path.parent)
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()

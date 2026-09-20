@@ -158,7 +158,19 @@ def run(args):
         return store.restore(args.archive, args.token)
 
 
+def _utf8_stdio():
+    """Z22：非 UTF-8 终端（如 Windows GBK 代码页）下打印中文/特殊字符不再触发
+    UnicodeEncodeError 二次 traceback；输出统一为 UTF-8，无法编码的字符以替换符兜底，
+    保证错误路径始终输出可解析的单行 JSON。py<3.7 或流不可重配时静默保持现状。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv=None):
+    _utf8_stdio()
     args = parser().parse_args(argv)
     try:
         result = run(args)
