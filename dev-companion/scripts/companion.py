@@ -91,6 +91,8 @@ def parser():
                        help="blocked/cancelled/failed 必须给出原因（Z24）")
     child.add_argument("--blocked-by", dest="blocked_by", default="",
                        help="逗号分隔的阻断链（可选）")
+    child.add_argument("--workspace", default=None,
+                       help="done 门产物核验目录（缺省项目根；实现在独立 worktree 时传其路径）")
     child.add_argument("--expect-seq", type=int, dest="expect_seq")
     # FIX-04/SR-01：门禁动作——创建/回报/独立审查/集成各有前置，状态 upsert 不再通用。
     child = sub.add_parser("team-task-add")
@@ -111,6 +113,8 @@ def parser():
     child.add_argument("--changed-files", dest="changed_files", default="")
     child.add_argument("--artifact-sha256", dest="artifact_sha256", required=True,
                        help="attempt 产出的固定版本 sha256（审查与集成都绑它）")
+    child.add_argument("--workspace", default=None,
+                       help="改动文件采集目录（缺省项目根；实现在独立工作区时传该工作区路径）")
     child.add_argument("--expect-seq", type=int, dest="expect_seq")
     child = sub.add_parser("team-approve")
     child.add_argument("--task", required=True)
@@ -300,7 +304,8 @@ def run(args):
             return team.set_task_status(args.project, args.task_id, args.feature,
                                         args.status, expect_seq=args.expect_seq,
                                         reason=args.reason,
-                                        blocked_by=_split_list(args.blocked_by))
+                                        blocked_by=_split_list(args.blocked_by),
+                                        workspace=args.workspace)
         if name == "team-task-add":
             return team.add_task(args.project, args.task_id, args.feature, args.kind,
                                  depends_on=_split_list(args.depends_on),
@@ -311,7 +316,8 @@ def run(args):
             return team.report(args.project, args.task, args.outcome, args.summary,
                                changed_files=_split_list(args.changed_files),
                                artifact_sha256=args.artifact_sha256,
-                               expect_seq=args.expect_seq)
+                               expect_seq=args.expect_seq,
+                               workspace=args.workspace)
         if name == "team-approve":
             return team.approve(args.project, args.task, args.reviewer, args.verdict,
                                 blockers=_split_list(args.blockers),

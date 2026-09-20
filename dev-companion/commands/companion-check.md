@@ -6,7 +6,7 @@ skills: dev-companion
 
 按技能与 CLI 约定读取当前状态。输入 `$ARGUMENTS` 可指定功能或提供真实反馈；多个候选无法识别时请用户选对应功能。
 
-主会话将当前需求、原型、接口、项目、功能编号和产物位置交给新的 `companion-checker`。检查者独立阅读实际文件，运行 `check --feature ID --kind feature`；规划项目还需 `check --feature ID --kind integration`。刚完成且仍新鲜的独立检查无需重复。模拟数据检查不能当作真实接口联调。
+主会话将当前需求、原型、接口、项目、功能编号和产物位置交给新的 `companion-checker`。检查者独立阅读实际文件，运行 `check --feature ID --kind feature`；规划项目还需 `check --feature ID --kind integration`。刚完成且仍新鲜的独立检查无需重复。模拟数据检查不能当作真实接口联调。team 模式（项目仅有 team.db）的 `check` 是只读台账审计（输出含 `audit_only: true`），只核对库内状态与证据一致性，不等同于功能验证——验收仍须以真实文件上运行的真实检查/回归结果为准。
 
 核对命令是否覆盖验收例子、关键成功与失败路径，不仅看退出码。失败、未执行、没有有意义的检查或证据过期时不验收。补充检查需要更新并确认相应范围，不用必定成功的占位命令。
 

@@ -137,9 +137,10 @@ class Sr04ReplayTests(Fix03RollbackBase):
         cli_json(self.project, "team-task", "--set", "sum", "--feature", "sum", "--status", "running")
         import hashlib
         sha = hashlib.sha256(b"sum-deliverable").hexdigest()
+        # FIX04-followup 更新说明：迁移导入的任务不带 allowed_paths（无文件边界），
+        # 新回报门禁拒绝无边界任务的 --changed-files——回退测试不依赖改动清单，去掉。
         cli_json(self.project, "team-report", "--task", "sum", "--outcome", "succeeded",
-                 "--summary", "迁移前功能合法完成", "--changed-files", "ledger.py",
-                 "--artifact-sha256", sha)
+                 "--summary", "迁移前功能合法完成", "--artifact-sha256", sha)
         cli_json(self.project, "team-task", "--set", "sum", "--feature", "sum", "--status", "done")
         self.register_review_evidence("sum", "review:sum")
 
@@ -221,8 +222,10 @@ class Sr04ReplayTests(Fix03RollbackBase):
         cli_json(self.project, "team-task", "--set", "p4", "--feature", "p4", "--status", "running")
         import hashlib
         sha = hashlib.sha256(b"p4-deliverable").hexdigest()
+        # FIX04-followup 更新说明：迁移导入的任务不带 allowed_paths（无文件边界），
+        # 新回报门禁拒绝无边界任务的 --changed-files——状态映射测试不依赖改动清单，去掉。
         cli_json(self.project, "team-report", "--task", "p4", "--outcome", "succeeded",
-                 "--summary", "完成", "--changed-files", "a.txt", "--artifact-sha256", sha)
+                 "--summary", "完成", "--artifact-sha256", sha)
         cli_json(self.project, "team-task", "--set", "p4", "--feature", "p4", "--status", "done")
         cli_json(self.project, "team-task", "--set", "p5", "--feature", "p5", "--status", "ready")
         cli_json(self.project, "team-task", "--set", "p5", "--feature", "p5", "--status", "running")

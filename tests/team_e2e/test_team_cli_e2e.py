@@ -9,6 +9,9 @@
   reviewer 身份落账（实现者自审被拒）；done 门在 CLI 内校验 attempt+回报+批准+证据；
   team-integrate 的版本级回归是真实 subprocess 在集成目录跑冒烟；集成后应用经临时
   端口真实 HTTP 读写；resume/status 在全新进程从 team.db 还原全部事实。
+  FIX04-followup：team-report/--workspace 从 worker worktree 真实采集改动文件的
+  内容 sha；done 前对 worktree 复核未漂移；team-integrate 对集成目录重核同一批
+  sha（被测内容=批准内容）并把 regressed_on 记进版本级回归证据。
 - 模拟：开发者"写代码"由 worker 进程内受控文件写入代替（本机无真实多模型并发）；
   集成目录合并由测试（集成者角色）做纯文件复制——合并不产生团队事实，事实全部
   走 CLI。测试内禁止手写 done：唯一的 done 都由 CLI 门禁放行（负面探针逐条断言）。
@@ -140,12 +143,16 @@ class TeamCliEndToEndTests(unittest.TestCase):
             cls.cli_json("team-report", "--task", tid, "--outcome", "succeeded",
                          "--summary", "%s 完成" % tid,
                          "--changed-files", ",".join(sorted(copies)),
-                         "--artifact-sha256", R["workers"][tid]["sha"])
+                         "--artifact-sha256", R["workers"][tid]["sha"],
+                         # FIX04-followup：改动文件从 worker 的真实 worktree 采集
+                         "--workspace", R["workers"][tid]["workspace"])
         # done 门：缺独立审查时拒绝（review_required 已开）
         R["gate_done_without_approval"] = cls.cli("team-task", "--set", BACKEND,
                                                   "--feature", "todo", "--status", "done").returncode
 
         # ---- 不同 reviewer 独立批准（自审拒绝探针） ----
+        # FIX04-followup：done 的产物核验目录 = worker 的真实 worktree（实现发生在
+        # 隔离工作区，不在项目根；报告时采集的 file_shas 据此核对）。
         R["self_review_exit"] = cls.cli("team-approve", "--task", BACKEND,
                                         "--reviewer", BACKEND + "#1",
                                         "--verdict", "approved").returncode
@@ -153,7 +160,8 @@ class TeamCliEndToEndTests(unittest.TestCase):
                               (FRONTEND, "companion-integrator/Q-frontend")):
             cls.cli_json("team-approve", "--task", tid, "--reviewer", reviewer,
                          "--verdict", "approved")
-            cls.cli_json("team-task", "--set", tid, "--feature", "todo", "--status", "done")
+            cls.cli_json("team-task", "--set", tid, "--feature", "todo", "--status", "done",
+                         "--workspace", R["workers"][tid]["workspace"])
         R["gate_done_to_ready"] = cls.cli("team-task", "--set", BACKEND, "--feature", "todo",
                                           "--status", "ready").returncode
 
@@ -252,6 +260,13 @@ class TeamCliEndToEndTests(unittest.TestCase):
         self.assertEqual(done["version_level"]["exit_code"], 0)
         self.assertIn("smoke.py", done["version_level"]["command"],
                       "版本级回归必须记录真实运行的命令")
+        # FIX04-followup：回归绑定冻结候选——记录实际运行于的报告 sha 集合
+        for tid, paths in ((BACKEND, BACKEND_PATHS), (FRONTEND, FRONTEND_PATHS)):
+            entry = done["regressed_on"][tid]
+            self.assertEqual(entry["artifact_sha256"], self.R["workers"][tid]["sha"])
+            for rel in paths:
+                self.assertRegex(entry["files"][rel], r"^[0-9a-f]{64}$",
+                                 "每个改动文件必须记录回归时点核对的内容 sha")
 
     def test_http_real_request_on_completed_version(self):
         """completed 版本上真实 HTTP 写入（非 mock）。"""
@@ -275,6 +290,8 @@ class TeamCliEndToEndTests(unittest.TestCase):
                          [{"integration_version": 1, "status": "completed",
                            "version_level_passed": True}])
         self.assertEqual(self.R["check_after"]["passed"], True)
+        self.assertEqual(self.R["check_after"]["audit_only"], True,
+                         "check 是台账审计（audit_only），不得冒充功能验证")
         self.assertEqual(self.R["audit_exit"], 0)
 
 

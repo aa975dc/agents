@@ -205,8 +205,10 @@ class Fix01ReadOnlyTests(unittest.TestCase):
         cli_json(self.project, "team-task", "--set", "t2", "--feature", "login", "--status", "ready")
         cli_json(self.project, "team-task", "--set", "t2", "--feature", "login", "--status", "running")
         sha = hashlib.sha256(b"t2-deliverable").hexdigest()
+        # FIX04-followup 更新说明：t2 未声明 allowed_paths（无文件边界），新回报门禁
+        # 拒绝无边界任务的 --changed-files——本测试聚焦读写边界，回报去掉改动清单。
         cli_json(self.project, "team-report", "--task", "t2", "--outcome", "succeeded",
-                 "--summary", "完成", "--changed-files", "b.py", "--artifact-sha256", sha)
+                 "--summary", "完成", "--artifact-sha256", sha)
         cli_json(self.project, "team-task", "--set", "t2", "--feature", "login", "--status", "done")
         view = cli_json(self.project, "team-status")
         self.assertEqual([(t["task_id"], t["status"]) for t in view["tasks"]["items"]],
