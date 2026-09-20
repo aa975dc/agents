@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T21:56:49+00:00",
+  "generated_at": "2026-09-20T21:58:17+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "bf974a97faa1172f576e32326c5861fb5c9e08c4"
+    "commit": "c6a1549313735457bb66ff8afb7560ac1b7ca156"
   },
   "target": {
     "plugin": "code-analysis-swarm",
