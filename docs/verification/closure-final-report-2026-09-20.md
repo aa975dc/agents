@@ -44,3 +44,14 @@ LICENSE 选择｜0.3.0 安装升级｜XL/XXL 大档压测｜全量深读模型�
 ## 复核包
 
 `agents-optimization-v1-review-1a7bc698.zip`（同目录 SHA256 见 MANIFEST）：候选已跟踪源码（git archive）+ 显式清单证据（docs/verification/ 全部记录与原始日志）+ 41/48/68 映射 + 宿主探针/H06/团队 E2E/L 档/R05 复测/XL-XXL 准备记录；排除 .git/.DS_Store/fixture 实体/任何密钥（扫描零命中）。
+
+## 候选交付定点复核附录（2026-09-20 第二轮；候选更新为 82fe866）
+
+用户四项定点核对结论（证据=tests/closure_store/test_team_identity_rollback.py 9 项、tests/test_ix05_acceptance.py 5 项、coverage.json 校验输出）：
+
+1. **IX05 → PASS（验收正确性半）**：check/accept/receipt fingerprint=全量 sha256 现算、集成候选/版本 sha 对 sha、审查绑内容 sha——同 mtime+size 内容变化（等长内容+utime 恢复，stat 面确证一致）下已接受成果回落 awaiting_review、集成版本 superseded、错配审查结论拒绝；scanner 缓存不刷新确证为索引层已知限制（对照面 hash_reused=1/computed=0），**缓存限制 ≠ 验收缺陷**，无需产品修复。
+2. **team 路径**：查实真实逃逸缺陷并已修复——team.db 为指向外部有效库的 symlink 时读写了项目外事实（外部文件 sha256 变化）；修复=项目目录 realpath 归一（四种别名同一事实源）+ .dev-companion/team.db symlink 无条件拒绝（错误含 readlink 目标，外部字节不变）；symlink 项目根仍为合法别名。
+3. **team 回退分级**：新增 team-rollback——空初始化与迁移后无新写入可回退（manifest 计数核对、legacy JSON 哈希不变）；有新事实无导出拒绝（报 N 条），--export-first 先导出草稿+全量事件日志（round-trip 可再迁移）。新增任务/审批/集成事实不因删库静默丢失。
+4. **V1 职责映射**：并入 companion-checker/Q1（测量执行+数字复核是检查者职责延伸），输入=technical check_commands 登记的测量命令+bench_runner 工具链，输出=实测数字+样本数+环境（未测逐条 NOT_MEASURED/NOT_RUN_AUTH），权限=只读测量+scratch 纪律。17/17 mapped，validate_coverage.py PASS，未新增角色文件。
+
+**修订计数**：68 验收 54→**55 PASS**（IX05 验收正确性半）；PARTIAL 9→8。48 问题计数不变（本次 team 逃逸系新发现即修缺陷，不属 48 项原编号，已计入候选 82fe866 变更与测试）。测试：python 662（643+5 ix05+9 team+5 容量判定等）/node 57。**复核包以 82fe866 重建，旧 1a7bc698 包作废。**
