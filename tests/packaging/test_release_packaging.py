@@ -13,8 +13,9 @@
   * dev-companion：_kernel_vendor 存在，MANIFEST.json 与副本逐文件
     sha256/字节数自洽（只对副本自检，不回查仓库源——源一致性由
     tests/packaging/test_vendor.py 负责）；
-  * code-analysis-swarm：无 agents_kernel 依赖 → 无需 vendor（与
-    tools/build_vendor.py 的 uses_kernel 判定同口径，.py 全文扫描）。
+  * code-analysis-swarm：precheck.py 的 index/g2/resume/coverage 子命令
+    引导 agents_kernel（SR-06）→ 与 dev-companion 同口径携带 vendor 并自检
+    （与 tools/build_vendor.py 的 uses_kernel 判定一致，.py 全文扫描）。
 
 只做静态与文件级检查；真实宿主对 0.3.0 安装副本的发现与加载属升级安装
 授权范围，显式 NOT_RUN（见 tests/host/test_static_host_contract.py 同款红线）。
@@ -152,14 +153,22 @@ class StandalonePackageTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"], entry["path"])
             self.assertEqual(len(data), entry["bytes"], entry["path"])
 
-    def test_swarm_needs_no_vendor_and_has_no_kernel_dependency(self):
-        """swarm 无 agents_kernel 依赖：不打包 vendor，也不应出现运行时引用。"""
+    def test_swarm_carries_vendor_for_index_bridge(self):
+        """SR-06：swarm 携带 vendor（precheck 索引桥接需要 agents_kernel），
+        副本 MANIFEST 与文件自检口径同 dev-companion。"""
         copy = self.copies["code-analysis-swarm"]
-        self.assertFalse((copy / "scripts" / "_kernel_vendor").exists(),
-                         "swarm 不应携带 vendor 副本")
-        offenders = [str(py.relative_to(copy)) for py in copy.rglob("*.py")
-                     if "agents_kernel" in py.read_text(encoding="utf-8")]
-        self.assertEqual(offenders, [], "swarm .py 出现 agents_kernel 引用，需重估 vendor 策略")
+        vendor = copy / "scripts" / "_kernel_vendor"
+        self.assertTrue((vendor / "agents_kernel").is_dir(),
+                        "swarm 副本缺 vendor 内核目录（index 桥接需要）")
+        manifest = read_json(vendor / "MANIFEST.json")
+        self.assertEqual(manifest["target"]["plugin"], "code-analysis-swarm")
+        listed = {entry["path"] for entry in manifest["files"]}
+        actual = {p.relative_to(vendor).as_posix() for p in vendor.rglob("*")
+                  if p.is_file() and p.name != "MANIFEST.json"}
+        self.assertEqual(listed, actual, "swarm MANIFEST 清单与 vendor 目录不闭合")
+        for entry in manifest["files"]:
+            data = (vendor / entry["path"]).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"], entry["path"])
 
 
 if __name__ == "__main__":

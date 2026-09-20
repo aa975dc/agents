@@ -9,8 +9,10 @@
 行为：
   1. 版本门禁：marketplace.json 与两个 plugin.json 一致性检查（对齐 .github/workflows/ci.yml
      的 packaging 作业）；不一致 exit 1 并逐条列出。
-  2. 依赖判定：扫描插件 .py 是否引用 agents_kernel；无依赖则跳过其 vendor 并说明
-     （code-analysis-swarm 当前无依赖）。
+  2. 依赖判定：扫描插件 .py 是否引用 agents_kernel；无依赖则跳过其 vendor 并说明。
+     （SR-06：code-analysis-swarm/scripts/precheck.py 的 index/g2/resume/coverage 子命令
+     经 _ensure_kernel 引导 agents_kernel，文本含内核名即被本判定命中，自动生成
+     swarm 的 vendor——既有规则补触发，无需额外开关。）
   3. 复制：排除 __pycache__/ 与 *.pyc；目标与源不符的文件覆盖并报告 diff 清单，
      源里已删除的目标残留文件清理并报告。
   4. 校验：源与副本逐字节（sha256+字节数）核对，不一致即失败。

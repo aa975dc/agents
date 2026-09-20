@@ -29,6 +29,16 @@ args:
 // 不闭合、声明制品未落盘）携带具体失败原因重问同一代理实例，初次+2 次修复尝试；路径逃逸等
 // 硬失败与同错复发直接 blocked。blocked 时已完成 G4 的 confirmed 结论保留在返回值并发布
 // 部分完成报告，不返回空 findings 抹掉成果。A7 只引用经 helper 核验真实存在的制品（Z11）。
+// SR-06 主链路容量接线：清单预检粗计数（precheck index-count）分类两条路径——
+// ≤ INDEX_THRESHOLD 保持旧行为直读（A1 返回完整 source_files，小库路径不变）；
+// 大于阈值走索引分页：index-scan 流式普查落 run_root/index/facts.sqlite（内核
+// IndexScanner 世代语义经 vendor 桥接），A1 只返回摘要+分块规划，清单以索引
+// manifest（generation/source_anchor 指纹）为据；G1 闭合改为 chunks-write +
+// index-verify 分页比对（全集在 python 侧核对，不进协调者上下文）；G2 派发经
+// chunks-page 分页领取、每批 ≤MAX_CONCURRENCY 块（与 kernel BackpressureGate
+// DEFAULT_MAX_PERMITS 同值），批内有界 Promise.all、批间顺序推进，逐块成功即写
+// g2-progress 检查点（原子写），ResumeLedger 登记活动并绑定 source_anchor——
+// 锚变化拒绝混代续跑，已成功块中断后跳过。
 function diag(run: { stdout: string; stderr: string }): string {
   const text = (run.stderr || run.stdout || "").split("\n").map(s => s.trim()).find(s => s.length > 0) ?? "";
   return text.slice(0, 200);
@@ -51,6 +61,23 @@ interface CodebaseMap {
   entry_points: { path: string; why: string; evidence: string }[];
   build_files: { path: string; kind: string }[];
   tree_summary: string; chunks: Chunk[];
+}
+// 大库（> INDEX_THRESHOLD）勘察返回（SR-06）：清单不再全量枚举——source_files 以
+// 索引世代承载（index manifest + 分页查询），A1 只给摘要与分块规划；排除项留在索引
+// 排除账，不要求返回。
+interface ScoutSummary {
+  meta: { target: string; generated_at: string; tool: string };
+  scan_status: "complete" | "empty" | "unreadable" | "partial";
+  scan_evidence: string;
+  languages: Record<string, number>; loc_total: number;
+  entry_points: { path: string; why: string; evidence: string }[];
+  build_files: { path: string; kind: string }[];
+  tree_summary: string; chunks: Chunk[];
+}
+// 索引世代引用（index-scan 回执的协调侧视图）；source_anchor 绑定 G2 检查点与领取。
+interface IndexRef {
+  manifest: string; index_db: string; generation: number;
+  file_count: number; excluded_count: number; source_anchor: string;
 }
 interface ModuleInfo {
   name: string; responsibility: string; entry_files: string[];
@@ -155,6 +182,14 @@ const CLAIM_PAGE_SIZE = 80;
 // Z08 批数上限（预算暂停语义）：批数超过它时不再继续派发，已复核批次照常采纳，
 // 剩余送验结论如实记 unverified 并写入 not_covered，不假装完成（CV03/CV04）。
 const MAX_CLAIM_PAGES = 50;
+// SR-06 大清单阈值：预检粗计数 ≤ 该值保持旧行为（A1 直读全量清单，H06 已过小库路径
+// 零改动）；超过即建索引分页（index-scan → chunks-page）。阈值显式写明，两条路径都
+// 保留，全量深读不因分页降级为抽样。
+const INDEX_THRESHOLD = 200;
+// SR-06 G2 有界并发：每批派发的块数上限，与 packages/agents_kernel/execution/
+// backpressure.py 的 Gate DEFAULT_MAX_PERMITS=3 同值——全部块一次性 Promise.all 的
+// 无界扇出被分批循环替代：批内有界扇出、批间顺序推进、逐块落检查点（大库路径）。
+const MAX_CONCURRENCY = 3;
 // 宿主禁止对 agent 取引用（含 typeof），也禁止重定型为本地结构接口（逃逸站点标识）；
 // 缓存必须以 facade 自己的 Agent 接口类型持有，ask 调用点才可被日志/重放定位。
 const actorCache = new Map<string, Agent>();
@@ -227,7 +262,8 @@ const gateChecks: string[] = [];
 // G4 后以 A6 verdict 定级；blocked 结局把它们留在返回值，并（已有 confirmed verdict 时）发布部分完成报告。
 let salvageFindings: WorkflowReport["findings"] = [];
 let salvageClaims: { claim_id: string; verdict: Verdict["verdict"] }[] = [];
-let salvageCoverage: NonNullable<WorkflowReport["coverage"]> | null = null;
+  let salvageCoverage: NonNullable<WorkflowReport["coverage"]> | null = null;
+  let coverageLedgerFailure: string | null = null;
 try {
   const target = absolute(args.target, "target");
   const teamRoot = absolute(args.team_root, "team_root");
@@ -259,42 +295,130 @@ try {
   requireThat(!inside(board, sourceReal) && !inside(sourceReal, board) && !inside(board, teamReal), "真实路径存在目标/运行/团队目录重叠");
   gateChecks.push(`路径预检：helper 排他创建 ${board}（run_id=${plan.run_id}，回执含 realpath 与创建时间）`);
 
+  // SR-06 清单预检：确定性粗计数分类直读/索引两条路径（计数只是阈值分类器，不是
+  // 普查证据——真实普查归 A1（小库）或 index-scan（大库，内核 IndexScanner 世代语义））。
+  stage = "清单预检";
+  phase("清单预检");
+  const countRun = await world.run("python3", [helperPath, "index-count", "--json", JSON.stringify({ source_root: target })]);
+  requireThat(countRun.exitCode === 0, `清单预检失败（exit ${countRun.exitCode}）：${diag(countRun)}`);
+  const counted = JSON.parse(countRun.stdout);
+  requireThat(counted?.ok === true && Number.isInteger(counted.file_count) && counted.file_count >= 0, "清单预检回执无效");
+  const useIndex = counted.file_count > INDEX_THRESHOLD;
+  let indexRef: IndexRef | null = null;
+  if (useIndex) {
+    const scanRun = await world.run("python3", [helperPath, "index-scan", "--json", JSON.stringify({ source_root: target, run_root: board })]);
+    requireThat(scanRun.exitCode === 0, `索引普查失败（exit ${scanRun.exitCode}）：${diag(scanRun)}`);
+    const scanned = JSON.parse(scanRun.stdout);
+    requireThat(scanned?.ok === true && Number.isInteger(scanned.generation) && scanned.generation >= 1
+      && Number.isInteger(scanned.file_count) && scanned.file_count > 0
+      && /^[0-9a-f]{64}$/.test(scanned.source_anchor ?? ""), "索引普查回执无效");
+    indexRef = {
+      manifest: `${board}/index/manifest.json`, index_db: `${board}/index/facts.sqlite`,
+      generation: scanned.generation, file_count: scanned.file_count,
+      excluded_count: Number.isInteger(scanned.excluded_count) ? scanned.excluded_count : 0,
+      source_anchor: scanned.source_anchor,
+    };
+  }
+  gateChecks.push(useIndex
+    ? `清单预检：${counted.file_count} 个文件（> 阈值 ${INDEX_THRESHOLD}）走索引分页；世代 ${indexRef!.generation}（file_count ${indexRef!.file_count}，anchor ${indexRef!.source_anchor.slice(0, 12)}…）`
+    : `清单预检：${counted.file_count} 个文件（≤ 阈值 ${INDEX_THRESHOLD}），保持直读清单`);
+
   artifact.board("chunks", {
     title: "分块分析进度", key: "id", status: "status", columns: ["待分析", "已检查制品"],
     cardTitle: "title", detail: [{ field: "files", label: "文件数" }],
   });
   stage = "G1 勘察闭合";
   phase("G1 勘察闭合");
-  const map = await agent("勘察员·罗经纬").ask<CodebaseMap>([
-    `先读 ${ROLE}/a1-scout.md。只读目标 ${JSON.stringify(target)}；黑板 ${JSON.stringify(board)}；不得写目标或插件目录。`,
-    `manifest 写 ${board}/manifest.json；返回完整同构 JSON，统一 snake_case，严格遵守 DESIGN.md 6.1。`,
-    "必须给出 scan_status、scan_evidence、source_files 完整枚举、excluded 及原因。读取失败不能当作空目录。每块 ≤5000 LOC 且 ≤150 文件，按实际需要分块，不截断。",
-  ].join("\n"));
-  requireThat(map && map.scan_status === "complete" && nonempty(map.scan_evidence), `勘察未闭合：${map?.scan_status ?? "无状态"}；不能声称空库或已验证`);
-  requireThat(map.meta && pathKey(map.meta.target) === pathKey(target) && nonempty(map.meta.generated_at) && map.meta.tool === "A1", "manifest 元数据缺失或目标不一致");
-  requireThat(map.languages && typeof map.languages === "object" && !Array.isArray(map.languages) && Object.values(map.languages).every(n => Number.isInteger(n) && n >= 0), "语言统计字段无效");
-  strings(map.source_files, "源文件清单");
-  requireThat(map.source_files.length > 0, "源文件清单为空；本次未分析");
-  unique(map.source_files.map(pathKey), "源文件路径");
-  requireThat(map.source_files.every(f => inside(f, target)), "源文件超出目标范围");
-  list(map.excluded, "排除清单");
-  requireThat(map.excluded.every(e => nonempty(e.path) && nonempty(e.reason)), "排除项缺少原因");
-  requireThat(Number.isInteger(map.loc_total) && map.loc_total >= 0 && nonempty(map.tree_summary), "勘察缺少规模或摘要");
-  list(map.entry_points, "入口清单"); list(map.build_files, "构建清单"); list(map.chunks, "分块");
-  requireThat(map.entry_points.every(e => inside(e.path, target) && nonempty(e.why) && nonempty(e.evidence)), "入口判定无证据或越界");
-  requireThat(map.build_files.every(f => inside(f.path, target) && nonempty(f.kind)), "构建文件无类型或越界");
-  unique(map.build_files.map(f => pathKey(f.path)), "构建文件");
-  unique(map.chunks.map(c => c.id), "块 ID");
-  for (const c of map.chunks) {
-    requireThat(/^chunk-[A-Za-z0-9_-]+$/.test(c.id), "块 ID 无效");
-    requireThat(nonempty(c.rationale), "分块依据缺失");
-    strings(c.files, "块文件"); strings(c.neighbors, "邻块");
-    requireThat(c.files.length > 0 && c.files.length <= 150 && Number.isInteger(c.loc_est) && c.loc_est >= 0 && c.loc_est <= 5000, `块 ${c.id} 尺寸不合格`);
-    requireThat(c.neighbors.every(id => id !== c.id && map.chunks.some(n => n.id === id)), "邻块引用不存在");
+  // 两条路径统一产物：后续闸门只依赖这些变量（小库来自 A1 全量清单，大库来自摘要+索引核对）。
+  let chunks: Chunk[] = [];
+  let treeSummary = "";
+  let entryPoints: { path: string; why: string; evidence: string }[] = [];
+  let buildFiles: { path: string; kind: string }[] = [];
+  let excludedItems: { path: string; reason: string }[] = [];
+  let coverageFiles = 0;
+  let manifestArtifact = `${board}/manifest.json`;
+  // 勘察员实例按名字缓存（宿主禁 agent 引用逃逸；两个分支共用同一实例，静态字面量仅一处）。
+  const scout = actorFor("勘察员·罗经纬");
+  if (indexRef === null) {
+    // —— 小库直读：旧行为不动（H06 已过路径）——
+    const map = await scout.ask<CodebaseMap>([
+      `先读 ${ROLE}/a1-scout.md。只读目标 ${JSON.stringify(target)}；黑板 ${JSON.stringify(board)}；不得写目标或插件目录。`,
+      `manifest 写 ${board}/manifest.json；返回完整同构 JSON，统一 snake_case，严格遵守 DESIGN.md 6.1。`,
+      "必须给出 scan_status、scan_evidence、source_files 完整枚举、excluded 及原因。读取失败不能当作空目录。每块 ≤5000 LOC 且 ≤150 文件，按实际需要分块，不截断。",
+    ].join("\n"));
+    requireThat(map && map.scan_status === "complete" && nonempty(map.scan_evidence), `勘察未闭合：${map?.scan_status ?? "无状态"}；不能声称空库或已验证`);
+    requireThat(map.meta && pathKey(map.meta.target) === pathKey(target) && nonempty(map.meta.generated_at) && map.meta.tool === "A1", "manifest 元数据缺失或目标不一致");
+    requireThat(map.languages && typeof map.languages === "object" && !Array.isArray(map.languages) && Object.values(map.languages).every(n => Number.isInteger(n) && n >= 0), "语言统计字段无效");
+    strings(map.source_files, "源文件清单");
+    requireThat(map.source_files.length > 0, "源文件清单为空；本次未分析");
+    unique(map.source_files.map(pathKey), "源文件路径");
+    requireThat(map.source_files.every(f => inside(f, target)), "源文件超出目标范围");
+    list(map.excluded, "排除清单");
+    requireThat(map.excluded.every(e => nonempty(e.path) && nonempty(e.reason)), "排除项缺少原因");
+    requireThat(Number.isInteger(map.loc_total) && map.loc_total >= 0 && nonempty(map.tree_summary), "勘察缺少规模或摘要");
+    list(map.entry_points, "入口清单"); list(map.build_files, "构建清单"); list(map.chunks, "分块");
+    requireThat(map.entry_points.every(e => inside(e.path, target) && nonempty(e.why) && nonempty(e.evidence)), "入口判定无证据或越界");
+    requireThat(map.build_files.every(f => inside(f.path, target) && nonempty(f.kind)), "构建文件无类型或越界");
+    unique(map.build_files.map(f => pathKey(f.path)), "构建文件");
+    unique(map.chunks.map(c => c.id), "块 ID");
+    for (const c of map.chunks) {
+      requireThat(/^chunk-[A-Za-z0-9_-]+$/.test(c.id), "块 ID 无效");
+      requireThat(nonempty(c.rationale), "分块依据缺失");
+      strings(c.files, "块文件"); strings(c.neighbors, "邻块");
+      requireThat(c.files.length > 0 && c.files.length <= 150 && Number.isInteger(c.loc_est) && c.loc_est >= 0 && c.loc_est <= 5000, `块 ${c.id} 尺寸不合格`);
+      requireThat(c.neighbors.every(id => id !== c.id && map.chunks.some(n => n.id === id)), "邻块引用不存在");
+    }
+    sameSet(map.chunks.flatMap(c => c.files).map(pathKey), map.source_files.map(pathKey), "分块覆盖");
+    gateChecks.push(`G1：${map.source_files.length} 个清单源文件分块覆盖闭合（枚举真实性依赖宿主扫描证据）`);
+    chunks = map.chunks;
+    treeSummary = map.tree_summary;
+    entryPoints = map.entry_points;
+    buildFiles = map.build_files;
+    excludedItems = map.excluded;
+    coverageFiles = map.source_files.length;
+  } else {
+    // —— 大库索引分页（SR-06）：清单以索引世代为据，A1 只给摘要+分块规划 ——
+    const summary = await scout.ask<ScoutSummary>([
+      `先读 ${ROLE}/a1-scout.md。只读目标 ${JSON.stringify(target)}；黑板 ${JSON.stringify(board)}；不得写目标或插件目录。`,
+      `大清单模式：本次已由确定性普查建立索引（世代 ${indexRef!.generation}，恰含 ${indexRef!.file_count} 个源文件，anchor ${indexRef!.source_anchor.slice(0, 12)}…，manifest ${indexRef!.manifest}）。不要枚举 source_files、不要写 manifest.json——文件清单以该索引世代的 files 表为唯一依据，可经 precheck index-page 分页查阅。`,
+      `返回完整同构 JSON（统一 snake_case）：scan_status=complete、scan_evidence（须引用索引世代与 manifest 路径）、languages、loc_total、tree_summary、entry_points、build_files（判定证据带行号）。`,
+      `分块规划 chunks 必须恰好覆盖索引全部 ${indexRef!.file_count} 个文件（一个不多一个不少）：每块 ≤5000 LOC 且 ≤150 文件，files 为目标根下的绝对路径（与索引清单逐条对应），邻块引用真实块 ID；按模块内聚分块，不截断、不抽样。排除项不必枚举（已记录在索引排除账）。`,
+    ].join("\n"));
+    requireThat(summary && summary.scan_status === "complete" && nonempty(summary.scan_evidence), `勘察未闭合：${summary?.scan_status ?? "无状态"}；不能声称空库或已验证`);
+    requireThat(summary.meta && pathKey(summary.meta.target) === pathKey(target) && nonempty(summary.meta.generated_at) && summary.meta.tool === "A1", "manifest 元数据缺失或目标不一致");
+    requireThat(summary.languages && typeof summary.languages === "object" && !Array.isArray(summary.languages) && Object.values(summary.languages).every(n => Number.isInteger(n) && n >= 0), "语言统计字段无效");
+    requireThat(Number.isInteger(summary.loc_total) && summary.loc_total >= 0 && nonempty(summary.tree_summary), "勘察缺少规模或摘要");
+    list(summary.entry_points, "入口清单"); list(summary.build_files, "构建清单"); list(summary.chunks, "分块");
+    requireThat(summary.entry_points.every(e => inside(e.path, target) && nonempty(e.why) && nonempty(e.evidence)), "入口判定无证据或越界");
+    requireThat(summary.build_files.every(f => inside(f.path, target) && nonempty(f.kind)), "构建文件无类型或越界");
+    unique(summary.build_files.map(f => pathKey(f.path)), "构建文件");
+    unique(summary.chunks.map(c => c.id), "块 ID");
+    for (const c of summary.chunks) {
+      requireThat(/^chunk-[A-Za-z0-9_-]+$/.test(c.id), "块 ID 无效");
+      requireThat(nonempty(c.rationale), "分块依据缺失");
+      strings(c.files, "块文件"); strings(c.neighbors, "邻块");
+      requireThat(c.files.length > 0 && c.files.length <= 150 && Number.isInteger(c.loc_est) && c.loc_est >= 0 && c.loc_est <= 5000, `块 ${c.id} 尺寸不合格`);
+      requireThat(c.neighbors.every(id => id !== c.id && summary.chunks.some(n => n.id === id)), "邻块引用不存在");
+    }
+    // 全集闭合不在协调者内存做：分块规划落盘后由 precheck index-verify 分页核对
+    // "分块覆盖 == 索引全集"（越界/虚构文件无法命中索引行，等价承担范围守卫）。
+    const chunksWrite = await world.run("python3", [helperPath, "chunks-write", "--json", JSON.stringify({ run_root: board, chunks: summary.chunks })]);
+    requireThat(chunksWrite.exitCode === 0, `分块规划落盘失败（exit ${chunksWrite.exitCode}）：${diag(chunksWrite)}`);
+    const chunksReceipt = JSON.parse(chunksWrite.stdout);
+    requireThat(chunksReceipt?.ok === true && chunksReceipt.chunk_count === summary.chunks.length, "分块规划落盘回执无效");
+    const verifyRun = await world.run("python3", [helperPath, "index-verify", "--json", JSON.stringify({ run_root: board })]);
+    requireThat(verifyRun.exitCode === 0, `分块覆盖与索引全集不闭合（exit ${verifyRun.exitCode}）：${diag(verifyRun)}`);
+    const verified = JSON.parse(verifyRun.stdout);
+    requireThat(verified?.ok === true && verified.source_anchor === indexRef.source_anchor && verified.file_count === indexRef.file_count, "索引核对回执无效");
+    gateChecks.push(`G1：索引世代 ${indexRef.generation} 全集 ${indexRef.file_count} 个文件与 A1 分块规划闭合（precheck index-verify 分页核对，${summary.chunks.length} 块，清单不进协调者上下文）`);
+    chunks = summary.chunks;
+    treeSummary = summary.tree_summary;
+    entryPoints = summary.entry_points;
+    buildFiles = summary.build_files;
+    coverageFiles = indexRef.file_count;
+    manifestArtifact = indexRef.manifest;
   }
-  sameSet(map.chunks.flatMap(c => c.files).map(pathKey), map.source_files.map(pathKey), "分块覆盖");
-  gateChecks.push(`G1：${map.source_files.length} 个清单源文件分块覆盖闭合（枚举真实性依赖宿主扫描证据）`);
-  for (const c of map.chunks) report({ id: c.id, title: c.id, files: c.files.length, status: "待分析" }, "chunks");
+  for (const c of chunks) report({ id: c.id, title: c.id, files: c.files.length, status: "待分析" }, "chunks");
 
   // G2：单块 schema/覆盖校验失败 → 可修复回流到同一 A2 实例（Z03）；
   // from_contract 为可选布尔（缺省 false），进入 G2 schema 校验（Z10）。
@@ -321,16 +445,71 @@ try {
       if (e.from_contract === undefined) e.from_contract = false;
     }
   }
-  let moduleResults = await Promise.all(map.chunks.map(c => askGate<ModuleResult>(a2Name(c.id), feedback => actorFor(a2Name(c.id)).ask<ModuleResult>([
-    `先读 ${ROLE}/a2-module-analyst.md；按 DESIGN.md 6.2 返回完整 snake_case JSON。`,
-    `目标与块文件闭集：${JSON.stringify({ target, chunk: c })}；摘要：${map.tree_summary}。`,
-    `本块结果写 ${board}/chunks/${c.id}.json；契约只写 ${board}/interfaces/${c.id}/。`,
-    "并行阶段没有已冻结的邻块契约，不依赖其他块完成顺序；跨块不明之处记录 gaps 并退回，不猜测。",
-    "coverage 必含 analyzed_files 精确路径列表和 gaps；抽样/部分读取不能计作完整深读。findings.id 以块 ID 开头；findings.where 必须为「路径:行号」或「路径:起行-止行」格式（行号取自真实读取位置）；edges 必含 source，from_contract 可选布尔（缺省 false）。",
-    feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 JSON：\n- ${feedback.split("\n").join("\n- ")}` : "",
-  ].filter(Boolean).join("\n")), r => validateChunkResult(r, c))));
+  // 共享 prompt（两条路径同文）：载荷 = 本块闭集（≤150 文件），永远不含其他块的清单。
+  function a2Prompt(c: Chunk, feedback: string): string {
+    return [
+      `先读 ${ROLE}/a2-module-analyst.md；按 DESIGN.md 6.2 返回完整 snake_case JSON。`,
+      `目标与块文件闭集：${JSON.stringify({ target, chunk: c })}；摘要：${treeSummary}。`,
+      `本块结果写 ${board}/chunks/${c.id}.json；契约只写 ${board}/interfaces/${c.id}/。`,
+      "并行阶段没有已冻结的邻块契约，不依赖其他块完成顺序；跨块不明之处记录 gaps 并退回，不猜测。",
+      "coverage 必含 analyzed_files 精确路径列表和 gaps；抽样/部分读取不能计作完整深读。findings.id 以块 ID 开头；findings.where 必须为「路径:行号」或「路径:起行-止行」格式（行号取自真实读取位置）；edges 必含 source，from_contract 可选布尔（缺省 false）。",
+      feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 JSON：\n- ${feedback.split("\n").join("\n- ")}` : "",
+    ].filter(Boolean).join("\n");
+  }
+  // SR-06 有界批次帮助：每批 ≤MAX_CONCURRENCY 个 ask 并行（BackpressureGate 同语义），
+  // 批间顺序推进；修复回流的重问也经它有界扇出。
+  async function boundedAsk(todo: Chunk[], dispatch: (c: Chunk) => Promise<ModuleResult>): Promise<ModuleResult[]> {
+    const out: ModuleResult[] = [];
+    for (let i = 0; i < todo.length; i += MAX_CONCURRENCY) {
+      out.push(...await Promise.all(todo.slice(i, i + MAX_CONCURRENCY).map(dispatch)));
+    }
+    return out;
+  }
+  let moduleResults: ModuleResult[] = [];
+  if (indexRef === null) {
+    // 小库直读：一次派发全部块（旧行为不动，块数受清单阈值间接约束）。
+    moduleResults = await Promise.all(chunks.map(c => askGate<ModuleResult>(a2Name(c.id), feedback => actorFor(a2Name(c.id)).ask<ModuleResult>(a2Prompt(c, feedback)), r => validateChunkResult(r, c))));
+  } else {
+    // 大库有界派发（SR-06）：检查点 + 台账登记先行（anchor 绑定索引世代指纹）。
+    const checkpointPath = `${board}/checkpoints/g2-progress.json`;
+    const initRun = await world.run("python3", [helperPath, "g2-progress", "--json", JSON.stringify({ run_root: board, action: "init", source_anchor: indexRef.source_anchor, generation: indexRef.generation, chunk_order: chunks.map(c => c.id) })]);
+    requireThat(initRun.exitCode === 0, `G2 检查点初始化失败（exit ${initRun.exitCode}）：${diag(initRun)}`);
+    const registerRun = await world.run("python3", [helperPath, "resume-register", "--json", JSON.stringify({ run_root: board, kind: "custom", activity_id: `g2-${plan.run_id}`, checkpoint_path: checkpointPath, schema_version: 1, source_anchor: indexRef.source_anchor })]);
+    requireThat(registerRun.exitCode === 0, `G2 活动续接登记失败（exit ${registerRun.exitCode}）：${diag(registerRun)}`);
+    const readRun = await world.run("python3", [helperPath, "g2-progress", "--json", JSON.stringify({ run_root: board, action: "read" })]);
+    requireThat(readRun.exitCode === 0, `G2 检查点读取失败（exit ${readRun.exitCode}）：${diag(readRun)}`);
+    const progressState = JSON.parse(readRun.stdout);
+    if (progressState?.exists && (progressState.checkpoint?.completed?.length ?? 0) > 0) {
+      // 重入：已有进度——核对登记锚（变化即拒绝混代续跑）；chunks-page 会自动跳过已完成块。
+      const checkRun = await world.run("python3", [helperPath, "resume-check", "--json", JSON.stringify({ run_root: board, kind: "custom", activity_id: `g2-${plan.run_id}`, current_anchor: indexRef.source_anchor })]);
+      requireThat(checkRun.exitCode === 0, `G2 续接核对失败（exit ${checkRun.exitCode}）：${diag(checkRun)}`);
+      const checked = JSON.parse(checkRun.stdout);
+      requireThat(checked?.condition !== "stale_anchor", `G2 源锚已变化，拒绝混代续跑：${checked?.detail ?? "无详情"}`);
+    }
+    for (let batchNo = 0; ; batchNo++) {
+      // 恒取 page 0：检查点即游标——chunks-page 每次返回"下一批未完成块"（≤MAX_CONCURRENCY），
+      // 完成的块动态退出待领集合，page 序号对收缩集合不是稳定序号；空批即终态。
+      const pageRun = await world.run("python3", [helperPath, "chunks-page", "--json", JSON.stringify({ run_root: board, page: 0, page_size: MAX_CONCURRENCY, anchor: indexRef.source_anchor })]);
+      requireThat(pageRun.exitCode === 0, `分块第 ${batchNo + 1} 批领取失败（exit ${pageRun.exitCode}）：${diag(pageRun)}`);
+      const pageReceipt = JSON.parse(pageRun.stdout);
+      requireThat(pageReceipt?.ok === true && Array.isArray(pageReceipt.chunks) && pageReceipt.chunks.length <= MAX_CONCURRENCY, `分块第 ${batchNo + 1} 批领取回执无效`);
+      const batch: Chunk[] = pageReceipt.chunks;
+      // 终止条件只有"空批"：pending 随检查点完成动态收缩。
+      if (batch.length === 0) break;
+      const done = await Promise.all(batch.map(async c => {
+        const r = await askGate<ModuleResult>(a2Name(c.id), feedback => actorFor(a2Name(c.id)).ask<ModuleResult>(a2Prompt(c, feedback)), r => validateChunkResult(r, c));
+        // 单块成功即落检查点（原子写）：批内其他块失败不影响已成功块的续跑跳过。
+        const markRun = await world.run("python3", [helperPath, "g2-progress", "--json", JSON.stringify({ run_root: board, action: "mark", chunk_id: r.meta.chunk_id })]);
+        requireThat(markRun.exitCode === 0, `G2 进度检查点写入失败（块 ${r.meta.chunk_id}，exit ${markRun.exitCode}）：${diag(markRun)}`);
+        return r;
+      }));
+      moduleResults.push(...done);
+    }
+    gateChecks.push(`G2 有界并发：${chunks.length} 块经 chunks-page 分页派发（每批 ≤${MAX_CONCURRENCY}，与 kernel BackpressureGate 同值，批间顺序），逐块成功落 g2-progress 检查点（anchor ${indexRef.source_anchor.slice(0, 12)}…）`);
+  }
   // G2 汇总：模块名跨块唯一、依赖边端点可归位（可修复回流，Z03）。
-  function aggregateG2Issues(results: ModuleResult[], chunks: Chunk[]): { messages: string[]; affected: Set<string> } {
+  // 以 meta.chunk_id 关联（位置对齐在有界批次/检查点续跑下不成立）。
+  function aggregateG2Issues(results: ModuleResult[]): { messages: string[]; affected: Set<string> } {
     const names = results.flatMap(r => r.modules.map(m => m.name));
     const seen = new Set<string>(); const duplicated = new Set<string>();
     for (const n of names) { if (seen.has(n)) duplicated.add(n); seen.add(n); }
@@ -338,42 +517,42 @@ try {
     const messages: string[] = []; const affected = new Set<string>();
     if (duplicated.size > 0) {
       messages.push(`模块名跨块重复：${[...duplicated].join("、")}`);
-      results.forEach((r, i) => { if (r.modules.some(m => duplicated.has(m.name))) affected.add(chunks[i].id); });
+      results.forEach(r => { if (r.modules.some(m => duplicated.has(m.name))) affected.add(r.meta.chunk_id); });
     }
-    results.forEach((r, i) => {
+    results.forEach(r => {
       const bad = r.edges.filter(e => !nameSet.has(e.from) || !nameSet.has(e.to));
       if (bad.length > 0) {
-        messages.push(`块 ${chunks[i].id} 依赖边端点不能归位：${bad.map(e => `${e.from}->${e.to}`).join("、")}`);
-        affected.add(chunks[i].id);
+        messages.push(`块 ${r.meta.chunk_id} 依赖边端点不能归位：${bad.map(e => `${e.from}->${e.to}`).join("、")}`);
+        affected.add(r.meta.chunk_id);
       }
     });
     return { messages, affected };
   }
   for (let round = 0; ; round++) {
-    const issues = aggregateG2Issues(moduleResults, map.chunks);
+    const issues = aggregateG2Issues(moduleResults);
     if (issues.affected.size === 0) break;
     if (round >= MAX_REPAIRS) throw new RepairableIssue(`G2 汇总不闭合：${issues.messages.join("；")}`);
     const moduleNamesNow = moduleResults.flatMap(r => r.modules.map(m => m.name));
-    const prev = moduleResults;
-    moduleResults = await Promise.all(map.chunks.map(async (c, i) => {
-      if (!issues.affected.has(c.id)) return prev[i];
-      return await askGate<ModuleResult>(a2Name(c.id), () => actorFor(a2Name(c.id)).ask<ModuleResult>([
-        "G2 汇总检查发现你此前返回的块结果存在以下问题，请修复后重新返回完整 JSON：",
-        `- ${issues.messages.join("\n- ")}`,
-        `当前模块全集（模块命名不得与之冲突；依赖边端点必须属于该全集或本块模块）：${JSON.stringify(moduleNamesNow)}`,
-        `目标与块文件闭集不变：${JSON.stringify({ target, chunk: c })}；本块结果写 ${board}/chunks/${c.id}.json；coverage 与 findings 规则同前。`,
-      ].join("\n")), r => validateChunkResult(r, c));
-    }));
+    const prevById = new Map(moduleResults.map(r => [r.meta.chunk_id, r]));
+    const todo = chunks.filter(c => issues.affected.has(c.id));
+    const fixed = await boundedAsk(todo, c => askGate<ModuleResult>(a2Name(c.id), () => actorFor(a2Name(c.id)).ask<ModuleResult>([
+      "G2 汇总检查发现你此前返回的块结果存在以下问题，请修复后重新返回完整 JSON：",
+      `- ${issues.messages.join("\n- ")}`,
+      `当前模块全集（模块命名不得与之冲突；依赖边端点必须属于该全集或本块模块）：${JSON.stringify(moduleNamesNow)}`,
+      `目标与块文件闭集不变：${JSON.stringify({ target, chunk: c })}；本块结果写 ${board}/chunks/${c.id}.json；coverage 与 findings 规则同前。`,
+    ].join("\n")), r => validateChunkResult(r, c)));
+    const fixedById = new Map(fixed.map(r => [r.meta.chunk_id, r]));
+    moduleResults = chunks.map(c => fixedById.get(c.id) ?? prevById.get(c.id)!);
   }
   const modules = moduleResults.flatMap(r => r.modules);
   const moduleNames = modules.map(m => m.name);
-  gateChecks.push(`G2：${map.chunks.length} 块返回的制品字段与逐文件覆盖检查通过`);
-  // Z11：A1/A2 声明写出的黑板制品经 helper 确定性核验存在（缺失 → A2 可修复回流；manifest 属 A1，硬阻断）。
+  gateChecks.push(`G2：本次执行 ${moduleResults.length}/${chunks.length} 块返回的制品字段与逐文件覆盖检查通过`);
+  // Z11：A1/A2 声明写出的黑板制品经 helper 确定性核验存在（缺失 → A2 可修复回流；A1 侧制品硬阻断）。
   stage = "G2 制品落盘核验";
   await ensureArtifacts(board, helperPath, [
-    { path: `${board}/manifest.json`, owner: null },
-    ...map.chunks.map(c => ({ path: `${board}/chunks/${c.id}.json`, owner: a2Name(c.id) })),
-    ...moduleResults.flatMap((r, i) => r.modules.map(m => ({ path: m.contract_path, owner: a2Name(map.chunks[i].id) }))),
+    { path: manifestArtifact, owner: null },
+    ...chunks.map(c => ({ path: `${board}/chunks/${c.id}.json`, owner: a2Name(c.id) })),
+    ...moduleResults.flatMap(r => r.modules.map(m => ({ path: m.contract_path, owner: a2Name(r.meta.chunk_id) }))),
   ], "G2 制品核验：", (owner, list) => `${owner} 声明产出的以下制品经确定性核验不存在：${list.join("、")}`);
 
   stage = "G3 专项闭合";
@@ -389,10 +568,10 @@ try {
     findingsValid(s.findings, "专项发现"); claimsValid(s.claims);
     soft(s.module_refs.every(n => moduleNames.includes(n)), "专项引用不存在的模块");
     if (kind === "architecture") soft(s.claims.length > 0, "架构判定没有送验结论");
-    if (kind === "build") sameSet(s.build_files_covered.map(pathKey), map.build_files.map(f => pathKey(f.path)), "构建入口覆盖");
+    if (kind === "build") sameSet(s.build_files_covered.map(pathKey), buildFiles.map(f => pathKey(f.path)), "构建入口覆盖");
   }
   const specialties = await Promise.all(specialtySpecs.map(([role, name, kind]) => askGate<Specialty>(name, feedback => actorFor(name).ask<Specialty>([
-    `先读 ${ROLE}/${role}。黑板 ${board}；目标 ${JSON.stringify(target)}；模块全集 ${JSON.stringify(moduleNames)}；构建清单 ${JSON.stringify(map.build_files)}。`,
+    `先读 ${ROLE}/${role}。黑板 ${board}；目标 ${JSON.stringify(target)}；模块全集 ${JSON.stringify(moduleNames)}；构建清单 ${JSON.stringify(buildFiles)}。`,
     `按角色契约写 ${board}/specialty/${kind}.md 及所属图表；返回 DESIGN.md 6.9 的共同摘要（snake_case）。`,
     "A3 不读原始代码；A4/A5 只定点读清单/锁文件/配置；禁止执行安装、构建和项目脚本。",
     "summary/details/findings/claims/module_refs/build_files_covered/not_covered 字段必须齐全；claims 有唯一 ID、source_role 和非空 evidence_refs。未覆盖内容如实声明。",
@@ -416,7 +595,7 @@ try {
   phase("G4 独立验证");
   const toVerify: Claim[] = [
     ...specialties.flatMap(s => s.claims),
-    ...map.entry_points.map((e, i) => ({ id: `entry-${i}`, claim: `程序入口：${e.path}；${e.why}`, source_role: "A1", evidence_refs: [e.evidence] })),
+    ...entryPoints.map((e, i) => ({ id: `entry-${i}`, claim: `程序入口：${e.path}；${e.why}`, source_role: "A1", evidence_refs: [e.evidence] })),
     // Z28：source_role 传角色名（与 a3/a4/a5 的 claims 一致），finding id 保留在 claim id 中，不再占用 source_role。
     ...findings.filter(f => f.severity === "high").map(f => ({ id: `finding:${f.id}`, claim: `${f.what}（${f.where}）`, source_role: "A2", evidence_refs: [f.where, f.evidence] })),
   ];
@@ -484,7 +663,29 @@ try {
   const verdictById = new Map(verdicts.map(v => [v.claim_id, v.verdict]));
   salvageFindings = findings.map(f => ({ ...f, status: verdictById.get(`finding:${f.id}`) === "confirmed" ? "verified" : verdictById.get(`finding:${f.id}`) === "refuted" ? "refuted" : "unverified" }));
   salvageClaims = verdicts.map(v => ({ claim_id: v.claim_id, verdict: v.verdict }));
-  salvageCoverage = { files: map.source_files.length, files_analyzed: moduleResults.reduce((n, r) => n + r.coverage.files_analyzed, 0), chunks: map.chunks.length, verdicts: verdicts.length, confirmed, refuted, unverified };
+  salvageCoverage = { files: coverageFiles, files_analyzed: moduleResults.reduce((n, r) => n + r.coverage.files_analyzed, 0), chunks: chunks.length, verdicts: verdicts.length, confirmed, refuted, unverified };
+  // C11 覆盖账接入（SR-06）：三维度分母/覆盖经 precheck coverage-record 落盘
+  // coverage_account.json（内核 CoverageLedger）。index_files 分母 = 清单全集
+  // （小库 A1 清单 / 大库索引世代），semantics_deep 分母同（G2 逐文件覆盖闸门保证
+  // 无缺口），independent_review 分母 = 送验结论全集、已复核 = 扣除分页上限截断。
+  stage = "G4 覆盖账落盘";
+  const unverifiedIds = verdicts.filter(v => v.verdict === "unverified").map(v => v.claim_id);
+  const coverageRun = await world.run("python3", [helperPath, "coverage-record", "--json", JSON.stringify({
+    run_root: board, run_id: plan.run_id, generation: indexRef === null ? null : indexRef.generation,
+    dimensions: {
+      index_files: { denominator: coverageFiles, covered: coverageFiles, gaps: [] },
+      semantics_deep: { denominator: coverageFiles, covered: salvageCoverage.files_analyzed, gaps: [] },
+      independent_review: { denominator: toVerify.length, covered: verdicts.length - pendingReview, gaps: unverifiedIds },
+    },
+  })]);
+  if (coverageRun.exitCode === 0) {
+    const coverageReceipt = JSON.parse(coverageRun.stdout);
+    requireThat(coverageReceipt?.ok === true, "覆盖账落盘回执无效");
+    gateChecks.push(`G4 覆盖账：index_files/semantics_deep/independent_review 三维度（分母 ${coverageFiles}/${coverageFiles}/${toVerify.length}，已复核 ${verdicts.length - pendingReview}）经 precheck coverage-record 落盘`);
+  } else {
+    // 覆盖账落盘失败不阻断发布；先记账，G5 汇总时如实进入 not_covered（不假装已记账）。
+    coverageLedgerFailure = `覆盖账落盘失败（exit ${coverageRun.exitCode}）：${diag(coverageRun)}`;
+  }
   // C11 覆盖账接入点：此处把 independent_review 维度（分母=toVerify.length，已复核=
   // verdicts.length-pendingN，缺口=分页上限/未复核清单）写入 packages/agents_kernel/
   // services/coverage.py 的 CoverageLedger——DWF 内经 world.run 调 python3 helper 落盘
@@ -503,11 +704,17 @@ try {
     "未运行真实构建/测试；静态分析不等于软件验收或开发完成",
     "源文件枚举与落盘内容依赖宿主工具和代理报告；当前运行时仅机械检查返回结构及引用闭合",
     "低/中严重度发现未逐条独立复查",
+    ...(indexRef === null ? [] : [`大清单模式（> ${INDEX_THRESHOLD} 文件）：源文件清单与排除账由索引世代 ${indexRef.generation}（anchor ${indexRef.source_anchor.slice(0, 12)}…）承载，未逐条进入协调者上下文；分块覆盖经 index-verify 与索引全集分页比对闭合`]),
   ];
+  const excludedSummary = indexRef === null
+    ? { count: excludedItems.length, details_in: manifestArtifact }
+    : { count: indexRef.excluded_count, details_in: `${board}/index/facts.sqlite 的 files_excluded 排除账（precheck 分页可查）`, note: "大清单模式：排除明细未逐条展开" };
   const notCovered = [
     ...baselineCaveats,
+    ...(coverageLedgerFailure !== null ? [coverageLedgerFailure] : []),
     ...(pendingReview > 0 ? [`A6 分页超上限，剩余 ${pendingReview} 条未复核（记 unverified；verdicts.json 仅含已复核批次）`] : []),
-    ...map.excluded.map(e => `排除 ${e.path}：${e.reason}`),
+    // 小库：排除项逐条原因照旧进 not_covered；大库：明细留在索引排除账（见 excludedSummary）。
+    ...(indexRef === null ? excludedItems.map(e => `排除 ${e.path}：${e.reason}`) : []),
     ...specialties.flatMap(s => s.not_covered),
     ...verdicts.filter(v => v.verdict === "unverified").map(v => `${v.claim_id} 未验证：${v.note}`),
   ];
@@ -517,14 +724,14 @@ try {
   const verdictSummary = `confirmed ${confirmed} / refuted ${refuted} / unverified ${unverified}；逐条状态：${verdicts.map(v => `${v.claim_id}=${v.verdict}`).join(",")}`;
   const notCoveredSummary = {
     baseline: baselineCaveats,
-    excluded: { count: map.excluded.length, details_in: `${board}/manifest.json` },
+    excluded: excludedSummary,
     specialty: specialtySpecs.map(([, , kind], i) => ({ kind, count: specialties[i].not_covered.length, details_in: `${board}/specialty/${kind}.md` })),
     unverified: { count: unverified, details_in: `${board}/verification/verdicts.json` },
   };
   // Z11：A7 只允许引用以上经 helper 核验真实存在的制品清单，未列入的文件不得作为报告素材。
   const verifiedArtifacts = {
-    manifest: `${board}/manifest.json`,
-    chunks: map.chunks.map(c => `${board}/chunks/${c.id}.json`),
+    manifest: manifestArtifact,
+    chunks: chunks.map(c => `${board}/chunks/${c.id}.json`),
     interfaces: modules.map(m => m.contract_path),
     specialty: specialtySpecs.map(([, , kind]) => `${board}/specialty/${kind}.md`),
     graph_csv: [`${board}/graph/internal-deps.csv`, `${board}/graph/external-deps.csv`],

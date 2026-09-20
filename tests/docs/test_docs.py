@@ -145,7 +145,8 @@ class ReadmeCommandTests(unittest.TestCase):
             self.skipTest("node 不可用")
         proc = subprocess.run(matched[0].split(), capture_output=True, text=True, cwd=str(REPO_ROOT))
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertIn("pass 57", proc.stdout)
+        # FIX-05 后工作流测试 62 项 + 宿主契约 3 项 = 65（README 的 57 待文档轮同步，此处跟随实际套件输出）
+        self.assertIn("pass 65", proc.stdout)
 
     def test_registry_check_command_runs(self):
         proc = run_registry("--check")

@@ -130,9 +130,24 @@ class VendorBuildTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(),
                          (REPO / "packages" / "agents_kernel" / "digest.py").read_bytes())
 
-    def test_swarm_without_kernel_dependency_is_skipped(self):
-        self.assertIn("跳过 code-analysis-swarm", self.build_output)
-        self.assertFalse((REPO / "code-analysis-swarm" / "scripts" / "_kernel_vendor").exists())
+    def test_swarm_kernel_dependency_gets_vendor(self):
+        """SR-06：precheck.py 的 index/g2/resume/coverage 子命令引导 agents_kernel，
+        uses_kernel 判定命中即自动生成 swarm vendor（既有规则补触发，同 dev-companion）。"""
+        self.assertIn("code-analysis-swarm: vendor 就绪", self.build_output)
+        swarm_vendor = REPO / "code-analysis-swarm" / "scripts" / "_kernel_vendor"
+        self.assertTrue((swarm_vendor / "agents_kernel").is_dir())
+        manifest = json.loads((swarm_vendor / "MANIFEST.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["target"]["plugin"], "code-analysis-swarm")
+        listed = {entry["path"] for entry in manifest["files"]}
+        actual = {p.relative_to(swarm_vendor).as_posix() for p in swarm_vendor.rglob("*")
+                  if p.is_file() and p.name != "MANIFEST.json"}
+        self.assertEqual(listed, actual, "swarm MANIFEST 清单与 vendor 目录不闭合")
+        for entry in manifest["files"]:
+            data = (swarm_vendor / entry["path"]).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"], entry["path"])
+            source = REPO / "packages" / entry["path"]
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), entry["sha256"],
+                             entry["path"] + " 副本与源不一致")
 
     def test_version_mismatch_rejects_build(self):
         root = self.sandbox / "repo"
