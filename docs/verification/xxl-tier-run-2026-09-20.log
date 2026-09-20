@@ -1,0 +1,30 @@
+2026-09-20T14:56:30Z
+命令: L_TIER=1 python3 -m unittest tests.benchmarks.test_xxl_tier -v   (小样本保守档：800 行/64MiB/4×4 目录；大档 NOT_RUN_AUTH)
+test_cumulative_and_distinct_reported_separately (tests.benchmarks.test_xxl_tier.TestStep1_HistoryCumulativeVsDistinct) ... ok
+test_current_generation_queryable_and_consistent (tests.benchmarks.test_xxl_tier.TestStep1_HistoryCumulativeVsDistinct)
+当前代单快照可查：reader 计数 == distinct 口径；全集翻页无重无漏。 ... ok
+test_aggregates_match_real_rows (tests.benchmarks.test_xxl_tier.TestStep2_RootManifestAndMergedPagination) ... ok
+test_cursor_rejected_after_shard_rescan (tests.benchmarks.test_xxl_tier.TestStep2_RootManifestAndMergedPagination)
+游标绑定 generation vector：某片重扫后续页拒绝（不拼两代结果）。 ... ok
+test_merged_pagination_matches_oracle_and_resumes (tests.benchmarks.test_xxl_tier.TestStep2_RootManifestAndMergedPagination)
+翻页全集 == oracle；序列化游标跨读取器续页不重不漏。 ... ok
+test_root_manifest_capture_load_roundtrip (tests.benchmarks.test_xxl_tier.TestStep2_RootManifestAndMergedPagination) ... ok
+test_root_manifest_row_count_mismatch_rejected (tests.benchmarks.test_xxl_tier.TestStep2_RootManifestAndMergedPagination) ... ok
+test_capacity_result_ledger_emitted (tests.benchmarks.test_xxl_tier.TestStep3_SummaryBoundedAndResultLedger)
+09 §2 字段 JSON：分项分列；未采集字段 NOT_MEASURED；外推输入如实附上。 ... ok
+test_page100_latency_sampled (tests.benchmarks.test_xxl_tier.TestStep3_SummaryBoundedAndResultLedger)
+首页 100 条 30 次温热 p50/p95：小样本仅记录，不外推为 XXL 达标。 ... ok
+test_summary_overview_fixed_keys_and_bounded_pages (tests.benchmarks.test_xxl_tier.TestStep3_SummaryBoundedAndResultLedger) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.834s
+
+OK
+
+XXL-TIER-RESULT step1_history {"count_distinct_current_entries": 811, "count_total_rows": 2418, "generations": 3, "per_generation": [{"added": 0, "deleted": 0, "file_count": 800, "generation": 1, "modified": 0, "scan_seconds": 0.015}, {"added": 7, "deleted": 0, "file_count": 807, "generation": 2, "modified": 8, "scan_seconds": 0.016}, {"added": 7, "deleted": 3, "file_count": 811, "generation": 3, "modified": 8, "scan_seconds": 0.016}]}
+
+XXL-TIER-RESULT capacity_09s2 {"content_files": 809, "count_distinct_current_entries": 811, "count_total_rows": 2418, "count_total_rows_caliber": "多代累计（工作量口径，≠ 当前代 distinct 条目数）", "edges": 2426, "elapsed_seconds": 0.047, "entries": 811, "events": "NOT_MEASURED", "extrapolation_inputs": {"index_bytes_per_row": 338.39, "note": "小样本实测，仅作登记文档外推公式的输入", "scan_rows_per_second": 50687.5}, "generation_count": 3, "included_bytes": 964400, "index_db_bytes": 274432, "regular_files": 811, "rows_per_generation": [800, 807, 811], "scale_note": "small-conservative(≤1000 行/64MiB，小样本不外推为容量认证)", "scan_seconds_per_generation": [0.015, 0.016, 0.016], "targets_not_executed": {"generations": 10, "reason": "未获资源预算授权（09 §5）；估算见登记文档外推表", "rows": 10000000, "status": "NOT_RUN_AUTH"}, "tasks": "NOT_MEASURED", "tier": "XXL"}
+
+XXL-TIER-RESULT step3_page100 {"note": "小样本时延不外推为 XXL 档 SLO 达标", "p50_s": 0.001824, "p95_s": 0.008467, "page_size": 100, "reps": 30}
+EXIT=0
+2026-09-20T14:56:31Z
