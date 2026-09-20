@@ -55,3 +55,21 @@ LICENSE 选择｜0.3.0 安装升级｜XL/XXL 大档压测｜全量深读模型�
 4. **V1 职责映射**：并入 companion-checker/Q1（测量执行+数字复核是检查者职责延伸），输入=technical check_commands 登记的测量命令+bench_runner 工具链，输出=实测数字+样本数+环境（未测逐条 NOT_MEASURED/NOT_RUN_AUTH），权限=只读测量+scratch 纪律。17/17 mapped，validate_coverage.py PASS，未新增角色文件。
 
 **修订计数**：68 验收 54→**55 PASS**（IX05 验收正确性半）；PARTIAL 9→8。48 问题计数不变（本次 team 逃逸系新发现即修缺陷，不属 48 项原编号，已计入候选 82fe866 变更与测试）。测试：python 662（643+5 ix05+9 team+5 容量判定等）/node 57。**复核包以 82fe866 重建，旧 1a7bc698 包作废。**
+
+## 独立复核修复轮（FIX-01–FIX-06，2026-09-21；被审对象 1a7bc698，修复后候选 548f03a）
+
+独立复核者对 1a7bc698 包给出 CHANGES_REQUIRED（SR-01–07）。本轮先在真实 HEAD 复现、再最小修复，全部转为负向/正确性断言：
+
+| SR | 复现→处置 | 修复提交 | 证据 |
+|---|---|---|---|
+| SR-01 team 门禁绕过 | team-task 直接写 done/ready/blocked 三条 exit 0 → 全部 exit 2 拒绝（门禁动作模型：done 需未完结 attempt+成功回报+有效批准+证据行同事务） | 95f2e9f | tests/closure_store/test_fix04_gates.py 9 项；探针 stderr 拒绝原文 |
+| SR-02 越界库 | symlink 逃逸已由 36621cc 堵住；本轮补只读打开分离（ro URI、不建库/不迁移/无 journal）、目录/fifo/损坏/schema 未知拒绝 | 3ffdeb9 | tests/closure_store/test_fix01_readonly.py 8 项（外库哈希/表结构不变断言） |
+| SR-03 双进程同 epoch | 复现（both epoch=2、A 覆盖）→ exclusive_lock 临界区 + (epoch,owner) 身份对；修复后探针双写者全拒、seed 台账原样 | 9559b93 | tests/recovery/test_resume_race.py 7 项 + boundaries/resume 探针终版 JSON |
+| SR-04 回退丢事实 | 导出改事件日志全量折叠（sidecar 保不可映射事实+逐条 warnings）；done→awaiting_review 显式降级映射（不升 accepted）；草稿过真实 Project.load | 3ffdeb9 | tests/closure_store/test_fix03_rollback.py（new_task_missing_in_export=false） |
+| SR-05 入口不识别 team | team 模式路由：有 team.db 无 state.json → status/progress/resume/check 走同一团队协调服务；team-only 项目正常 status exit 0 团队视图；RUNBOOK 重写为真实入口（精确 allowed_paths、双 worker attempt/approve/integrate） | 95f2e9f | tests/team_e2e/test_team_cli_e2e.py 6 断言（真实隔离/审查/HTTP/跨进程恢复） |
+| SR-06 DWF 不接容量组件 | ≤200 文件保持直读（H06 路径），>200 走 vendor kernel 索引：A1 摘要+清单引用（不 stringify 全集）、G1 分页比对、G2 经 chunks-page 每批 ≤3+原子检查点+generation/anchor 绑定（混代拒绝）；覆盖三分母经 CoverageLedger | 2656364 | tests/test_precheck_index.py 27 项 + workflow 8 项断言；800 行 kill -9 续跑实测（只领剩余 10 块、并集=全集） |
+| SR-07 测试口径 | /private/var 断言改可移植 symlink 用例+darwin skip；build_vendor archive 模式（AGENTS_SOURCE_COMMIT 强制 archive: 前缀，SHA 形态 exit 2 拒绝伪造）；scan 跳过条件改系统 git 可用性；计数口径文档（collected/testsRun/方法级/类级 skip 分列） | 548f03a | 两种形态实测：checkout packaging 9/9、去 .git 副本 3/3+git 组 skip；计数文档 |
+
+**候选更新**：1a7bc698 → **548f03a056600fe5b896cf09cf87080e60866944**（本轮 8 提交）。测试：python **725 collected / 725 testsRun / 725 success / 0 failure / 0 error**（12 类级门控 skip=34 方法不运行，另 1 方法级 darwin skip 待 Linux 复跑确认）；node **65/65**。复核者两条 Linux 测试失败（r05 路径、vendor git 前提）均已修复为可移植/分形态断言；其证据身份保留于 docs/verification/fix-review/。
+
+**边界（如实）**：真实宿主 0.3.0 团队验收、>200 文件 DWF 大清单端到端、XL/XXL 大档、冷缓存、Windows、Linux 本轮复跑——均 NOT_RUN/待授权。SR-05 的 runbook 交互细节（浏览器走查等）仍属宿主门。
