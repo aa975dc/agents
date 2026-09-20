@@ -33,6 +33,11 @@ function diag(run: { stdout: string; stderr: string }): string {
   const text = (run.stderr || run.stdout || "").split("\n").map(s => s.trim()).find(s => s.length > 0) ?? "";
   return text.slice(0, 200);
 }
+// 宿主对制品元数据有硬上限：title ≤120 字符、description ≤500 字符（超限直接抛错，
+// G5 曾因此 blocked）。截断而非失败——报告正文本身不受限。try 与 catch 的发布点共用。
+function clampMeta(text: string, max: number): string {
+  return text.length <= max ? text : text.slice(0, max - 1) + "…";
+}
 interface Claim { id: string; claim: string; source_role: string; evidence_refs: string[] }
 interface Finding { id: string; where: string; what: string; evidence: string; severity: "low" | "medium" | "high"; confidence: number }
 interface Chunk { id: string; files: string[]; loc_est: number; neighbors: string[]; rationale: string }
@@ -478,10 +483,11 @@ try {
   requireThat(inspectRun.exitCode === 0, `报告文件无法核实（exit ${inspectRun.exitCode}）：${diag(inspectRun)}`);
   const inspected = JSON.parse(inspectRun.stdout);
   requireThat(inspected?.ok === true && Number.isInteger(inspected.size) && inspected.size > 0 && /^[0-9a-f]{64}$/.test(inspected.sha256) && nonempty(inspected.body), "报告文件内容或哈希回执无效");
-  await artifact.markdown("report", inspected.body, { title: `《${repoName}》代码分析报告`, description: reportFile.summary, primary: true });
+  // 宿主元数据上限（title≤120/description≤500）由脚本顶部 clampMeta 统一截断。
+  await artifact.markdown("report", inspected.body, { title: clampMeta(`《${repoName}》代码分析报告`, 120), description: clampMeta(reportFile.summary, 500), primary: true });
   let publicationBlocked: string | null = null;
   if (nonempty(inspected.publish_relpath)) {
-    await artifact.file("report-file", inspected.publish_relpath, { title: `《${repoName}》代码分析报告文件`, description: `sha256 ${inspected.sha256}` });
+    await artifact.file("report-file", inspected.publish_relpath, { title: clampMeta(`《${repoName}》代码分析报告文件`, 120), description: `sha256 ${inspected.sha256}` });
   } else {
     publicationBlocked = `publication_blocked：运行目录在宿主 workspace 外，报告文件保留在 ${reportPath}（sha256 ${inspected.sha256}），未复制进源码`;
     notCovered.push(publicationBlocked);
@@ -527,7 +533,7 @@ try {
       ...notCoveredFinal.map(s => `- ${s}`),
     ].join("\n");
     try {
-      await artifact.markdown("partial-report", body, { title: `《${repoName}》代码分析报告（部分完成）`, description: `阻断于 ${stage}；confirmed 结论已保留` });
+      await artifact.markdown("partial-report", body, { title: `《${repoName}》代码分析报告（部分完成）`, description: clampMeta(`阻断于 ${stage}；confirmed 结论已保留`, 500) });
     } catch (publishError) {
       notCoveredFinal.push(`部分完成报告发布失败：${publishError instanceof Error ? publishError.message : String(publishError)}`);
     }
