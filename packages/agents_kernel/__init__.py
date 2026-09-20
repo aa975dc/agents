@@ -1,7 +1,8 @@
 """Shared kernel for the Dev Companion scripts (stdlib only, Python 3.9+).
 
 下沉的单一实现：路径安全与敏感清单（paths）、文件哈希口径（digest）、纯校验
-（validation）、原子写与 JSON 读取（atomicio）、子进程执行与输出脱敏（process）。
+（validation）、原子写与 JSON 读取（atomicio）、子进程执行与输出脱敏（process）、
+SQLite 事实库与单协调写者（storage）、事件折叠的当前视图与只读分页查询（domain）。
 上层（core/journey/releases/archives/CLI）从这里 import；kernel 不反向依赖任何上层模块。
 
 分发边界（P2-05 前的现状）：仅支持仓库布局——<repo>/packages/agents_kernel 与
