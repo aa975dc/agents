@@ -19,6 +19,9 @@ args:
     description: 本次唯一标识，只含字母数字下划线和连字符，不得复用；缺省时由 helper 用 secrets 生成
 */
 
+// H06 第 3 轮注：AmendWorkflow 不会继承上一轮 args，必须随提交显式传入 target/team_root
+// （此前两轮 blocked 于参数检查即因漏传 args，脚本本身零改动）。
+
 // 预检、报告核实与制品存在性核验走 scripts/precheck.py（标准库 helper，经 world.run
 // 固定 argv 调用，回执为 stdout 单行 JSON）：realpath/lstat/目录关系/排他 mkdir/
 // 敏感路径拒绝均为确定性检查，不再采信代理自述布尔（Z02/Z09）。四个根目录见 helper 文档字符串。
