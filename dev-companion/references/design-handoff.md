@@ -1,6 +1,6 @@
 # 设计交接契约
 
-本文件是 companion-design 角色与下游（companion-developer 实现、companion-checker 核对）共同引用的契约：设计 brief 按下面的最小结构编写和交接。示例仅演示结构，所有内容必须替换为真实界面的事实；示例文字不证明设计已被联审或冻结。
+本文件是 companion-design 角色与下游（companion-developer 实现、companion-checker 核对）共同引用的契约：设计 brief 按下面的最小结构编写和交接。示例仅演示结构，所有内容必须替换为真实界面的事实；示例文字不证明设计已被联审或冻结。本契约由 packages/agents_kernel/contracts/schemas.py 的校验器守护（机器校验为准）。
 
 ## 设计 brief 的最小结构
 

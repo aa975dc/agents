@@ -1,6 +1,6 @@
 # 接口契约（后端/数据/接口设计）
 
-本文件是 companion-backend 角色与下游（companion-developer 实现、companion-checker 核对、companion-design 字段映射）共同引用的契约：接口与数据设计按下面的最小结构编写和交接。示例仅演示结构，所有内容必须替换为真实实现的事实；示例文字不证明契约已被联审或冻结。
+本文件是 companion-backend 角色与下游（companion-developer 实现、companion-checker 核对、companion-design 字段映射）共同引用的契约：接口与数据设计按下面的最小结构编写和交接。示例仅演示结构，所有内容必须替换为真实实现的事实；示例文字不证明契约已被联审或冻结。本契约由 packages/agents_kernel/contracts/schemas.py 的校验器守护（机器校验为准）。
 
 ## 接口契约的最小结构
 

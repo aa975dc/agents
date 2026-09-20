@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T07:40:20+00:00",
+  "generated_at": "2026-09-20T08:40:18+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "8a59f4ad289d5c8e0cb7b9fa745f12a2bdc5a4f8"
+    "commit": "3e118121f3c74bc57a8e5972a0ef3430d1552171"
   },
   "target": {
     "plugin": "dev-companion",
@@ -21,6 +21,16 @@
       "bytes": 2130
     },
     {
+      "path": "agents_kernel/contracts/__init__.py",
+      "sha256": "8964e33da7895f5623985975d18c5b55d8709ac0373562926634f9c51736e89b",
+      "bytes": 415
+    },
+    {
+      "path": "agents_kernel/contracts/schemas.py",
+      "sha256": "02f4c60f2c9baf4c165ae47388f826198ac64003ab26117a916608230567bc3b",
+      "bytes": 11751
+    },
+    {
       "path": "agents_kernel/digest.py",
       "sha256": "c8cd63984d71b40bc4733edd5ff269484a06d3f79998e7268b18effb9f230dcb",
       "bytes": 1684
@@ -31,9 +41,29 @@
       "bytes": 294
     },
     {
+      "path": "agents_kernel/domain/handoff.py",
+      "sha256": "53e6a73b5ef0e94730103fbb8c73dfdfe65297ed6a30eee811137088851cd5df",
+      "bytes": 4677
+    },
+    {
+      "path": "agents_kernel/domain/review_gate.py",
+      "sha256": "0a9d337705e1aeab2720e75262f6ee8afff9ccc6076b0d3bb905f199f6bae7b1",
+      "bytes": 2832
+    },
+    {
       "path": "agents_kernel/domain/views.py",
       "sha256": "e2100768351e7344040a8368ca9bd27981b269e729fead80b368b9de015b7224",
       "bytes": 8077
+    },
+    {
+      "path": "agents_kernel/execution/__init__.py",
+      "sha256": "815dc3ee3aee5b7dff54bc7dafcc31251e9d89a7a149d69e41c2654b0cb74762",
+      "bytes": 83
+    },
+    {
+      "path": "agents_kernel/execution/budget.py",
+      "sha256": "8770c028c9ce77ddb5c7d0f202d8bc1f5894454725c6b14be6087837229e8a3a",
+      "bytes": 4624
     },
     {
       "path": "agents_kernel/filesystem/__init__.py",
@@ -47,8 +77,8 @@
     },
     {
       "path": "agents_kernel/indexing/__init__.py",
-      "sha256": "cf9d12234d9b22d8ca82e8bad1cac3709b91bfc2f852108ccf5bcb24a459d9b6",
-      "bytes": 386
+      "sha256": "f5d847e6961a068183fc82095c91a64184e12b395554d82bb0411c007526bd77",
+      "bytes": 455
     },
     {
       "path": "agents_kernel/indexing/content_hash.py",
@@ -76,6 +106,11 @@
       "bytes": 9607
     },
     {
+      "path": "agents_kernel/indexing/slicing.py",
+      "sha256": "222cb2102175197459d5a34b5bdb508f8e3cb4d13261def161c94c8456cc6fdd",
+      "bytes": 8581
+    },
+    {
       "path": "agents_kernel/paths.py",
       "sha256": "741117dd91f7f25206bd3ceb1ea43d7706edaf2e71d83a864b0c032646c2c141",
       "bytes": 2104
@@ -97,13 +132,18 @@
     },
     {
       "path": "agents_kernel/services/__init__.py",
-      "sha256": "c8b486353823f9639f99d6ac6f890a2d8abcfc8225b1549982286ea7922bf8f7",
-      "bytes": 169
+      "sha256": "8926a0a0eb06f557c220ea60cd601c77c26b881181d0dcc6565ed778d72fc79f",
+      "bytes": 190
     },
     {
       "path": "agents_kernel/services/closure.py",
       "sha256": "98171013055d8dc4ef326d3389b821a88b610c0d1cbc41cc3ea2f69ac6d418f8",
       "bytes": 3431
+    },
+    {
+      "path": "agents_kernel/services/coverage.py",
+      "sha256": "856e73bf84c6d40c52aa18b6aa48012ff79df1df9ecdc7418b2ae85c47e0f14b",
+      "bytes": 4030
     },
     {
       "path": "agents_kernel/services/request_cache.py",
