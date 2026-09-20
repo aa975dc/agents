@@ -211,11 +211,11 @@
 
 | 场景 | 判定条件 | 通道 | 涉及角色 |
 |------|---------|------|---------|
-| 小仓库 | ≤10 个源文件 | ⚡ 快速通道 | C0 → A1（轻）→ A2 单实例 → A7 |
+| 小仓库 | ≤10 个源文件 | ⚡ 快速通道 | C0 → A1（轻）→ A2 单实例 → A6 → A7 |
 | 大仓库 | >100 文件 或 >50k LOC | 🌊 工作流通道 | 动态工作流全链路（并行 + 断点恢复 + 进度板） |
 | 中型仓库 | 两者之间 | 🏗️ 标准 SOP | 全链路 8 角色 |
 | 单维分析 | 只要依赖图 / 只要构建流程 | 📋 单维通道 | C0 → A1 → 对应专项 → A7（轻） |
-| 复析已有仓库 | 黑板已存在且目标有 git | 🔄 增量通道 | git 圈变更 → 只重派受影响块 → 重跑 A3~A7 |
+| 复析已有仓库 | 黑板已存在且目标有 git | 🔄 增量通道（设计目标；当前 DWF 实现仍全量重跑，见 5.5） | git 圈变更 → 只重派受影响块 → 重跑 A3~A7 |
 
 **默认倾向**：宁轻勿重。快速通道能解决的绝不跑标准 SOP。
 
@@ -340,6 +340,8 @@ verdicts:
 
 按第 7 节组织报告。A7 的任务参数只提供经 helper 核验真实存在的黑板制品清单（manifest/chunks/interfaces/specialty/graph/verdicts），清单之外的文件不得作为报告素材。DWF 返回 `{path, summary, sections: [0,1,2,3,4,5,6,7,8], claim_ids: [全部送验ID]}`。运行时检查声明和发布路径；对落盘正文的独立核对仍需真实宿主验收，不将结构检查等同于事实验证。blocked 结局时若 G4 已完成，confirmed 结论以"部分完成"报告（partial-report）保留发布。
 
+覆盖统计的记账口径由 `packages/agents_kernel/services/coverage.py` 的 `CoverageLedger`（C11）定义：`index_files`（G1 接入，source_files 分母）、`semantics_deep`（G2 接入，analyzed_files 汇总）、`independent_review`（G4 接入，送验 / 复核批）三个固定维度，每维度记录分母、已覆盖与缺口，分母未知不得声称完成。当前为最小实现（纯 Python 类 + 单测 `tests/test_coverage.py`），本次黑板以返回值 `coverage` 摘要字段承载；`coverage_account.json` 落盘由调用方负责，接入方式见 workflow 的"C11 覆盖账接入点"注释。
+
 ### 6.9 专项共同返回摘要（A3/A4/A5）
 
 ```yaml
@@ -405,9 +407,11 @@ G3 检查引用存在、架构判定进入送验、A5 构建文件覆盖闭合�
 ```
 code-analysis-swarm/
 ├── .zcode-plugin/plugin.json
+├── README.md                     # 插件视角简明说明（安装 / 组件 / command/ 目录名说明）
 ├── DESIGN.md
 ├── agents/                  # 七个带 name/description 的角色
 ├── command/swarm-analyze.md       # /swarm-analyze 入口
+├── scripts/precheck.py            # 预检与制品核验 helper
 └── workflow/code-analysis.dwf.ts
 ```
 

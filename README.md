@@ -80,10 +80,15 @@ flowchart TB
 | `companion-archive` | "保存这些文件""先预览恢复" | 保存、查看快照，预览并确认恢复 |
 | `companion-resume` | "接着上次继续" | 读取规划、实现、检查、发布与未决事项后续接 |
 
-不为每个阶段新建 Agent；只保留两个子代理角色：
+不为每个阶段新建 Agent；固定保留两个执行角色，另有三个按需设计角色（团队模式）：
 
 - **companion-developer（开发者）**：根据已确认的单项任务包实现功能，限定 `allowed_paths` 文件范围，回报真实产物（`implemented` / `verified_existing` / `blocked`）。不替用户验收或发布，不顺便重构，不提交推送部署。
 - **companion-checker（独立检查者）**：独立核对需求、流程、原型、真实功能与接口联调证据，运行 `check --kind feature` / `--kind integration`。不改产品代码，不以开发者自述代替检查，不替用户验收。
+- **companion-product（产品与可行性）**：把模糊想法澄清为带证据的需求例子与范围界定（需求歧义时回流此角色）。
+- **companion-design（UX/UI 设计）**：有界面 / 交互需求时产出并冻结版本化设计 brief。
+- **companion-backend（后端 / 数据 / 接口）**：接口或数据设计时产出并冻结 API 契约（错误码、幂等、迁移）。
+
+三个设计角色**按需引用，无相应需求不派发**；轻量模式（仅 developer + checker）完全保留，已有 `companion-*` 入口不变，不强制启用全部角色。设计 brief 与契约的联审不由产出者自审。
 
 子代理不再派发子代理；角色不可用但 `Agent` 工具可用时，把角色全文交给 `general-purpose` 执行同一职责。
 
@@ -185,7 +190,7 @@ stateDiagram-v2
 
 #### 实施与验证状态（2026-09-20）
 
-已验证：Python 主测试 **106/106**、原演示 **4/4**、Node 工作流 **36/36**（模拟宿主）；trace 覆盖 core 94% / journey 100% / releases 99% / archives 89%；23 步隔离项目演示到 `local_verified`，代理浏览器核验部署副本；真实派发 `companion-developer` 修复 + `companion-checker` 独立检查在桌面环境通过。尚未验证：**真实用户的需求问答、原型体验与软件试用**；正式远程部署（示例本地发布不代表任意云平台已适配）。细节见 [生命周期实施记录](docs/dev-companion-lifecycle.md)；旧版本历史见 [既有评审](docs/dev-companion-review.md)。
+已验证：Python 主测试 **564 通过**（另 5 项 L_TIER 长跑基准门在常规 discover 中 skip）、最小示例 **4/4**、Node **57/57**（工作流 54 + 宿主契约 3，模拟宿主）；0.2.0 里程碑 trace 覆盖 core 94% / journey 100% / releases 99% / archives 89%（见实施记录）；L 档 10 万条目基准实测见 [L 档验收](docs/verification/l-tier-acceptance-2026-09-20.md)；23 步隔离项目演示到 `local_verified`，代理浏览器核验部署副本；真实派发 `companion-developer` 修复 + `companion-checker` 独立检查在桌面环境通过。尚未验证：**真实用户的需求问答、原型体验与软件试用**；正式远程部署（示例本地发布不代表任意云平台已适配）。细节见 [生命周期实施记录](docs/dev-companion-lifecycle.md) 与 [阶段验证记录](docs/verification/)；旧版本历史见 [既有评审](docs/dev-companion-review.md)。
 
 ---
 
@@ -312,7 +317,7 @@ flowchart TD
 /swarm-analyze D:\projects\my-app 重新分析        # 建立新的运行记录
 ```
 
-动态工作流 `workflow/code-analysis.dwf.ts` 是**可选**路径（参数 `target` / `team_root` / `output_root` / `run_id`），只有宿主实际注册并验证 DWF 时才使用；没有 DWF 时按命令执行手动 SOP，保持相同制品与门禁。Node 测试（36 项）用模拟宿主验证其分派与结构拒绝逻辑，不替代真实 DWF 验收。
+动态工作流 `workflow/code-analysis.dwf.ts` 是**可选**路径（参数 `target` / `team_root` / `output_root` / `run_id`），只有宿主实际注册并验证 DWF 时才使用；没有 DWF 时按命令执行手动 SOP，保持相同制品与门禁。Node 测试（工作流 54 项 + 宿主契约 3 项，共 57 项）用模拟宿主验证其分派与结构拒绝逻辑，不替代真实 DWF 验收。
 
 #### 硬约束速览
 
@@ -331,22 +336,26 @@ flowchart TD
 agents/
 ├── marketplace.json                    # ZCode 插件市场清单（仓库根即市场根）
 ├── code-analysis-swarm/                # 插件：只读代码分析智能团 0.2.1
-│   ├── .zcode-plugin/plugin.json
+│   ├── .zcode-plugin/plugin.json       # commands 字段显式声明目录名 command/（单数，合法自定义）
+│   ├── README.md                       # 插件视角简明说明（安装 / 组件 / 命令 / 测试）
 │   ├── DESIGN.md                       # 完整设计（角色 / 闸门 / 契约 / 报告结构）
 │   ├── agents/                         # a1-scout ~ a7-reporter 七个角色提示词
 │   ├── command/swarm-analyze.md        # /swarm-analyze 入口（C0 操作手册）
+│   ├── scripts/precheck.py             # 预检与制品核验 helper（标准库，工作流经固定 argv 调用）
 │   └── workflow/code-analysis.dwf.ts   # 可选动态工作流
 ├── dev-companion/                      # 插件：新手开发陪伴 0.2.0
 │   ├── .zcode-plugin/plugin.json
 │   ├── README.md                       # 新手使用说明
-│   ├── commands/                       # 七个 companion-* 聊天入口
+│   ├── commands/                       # 七个 companion-* 聊天入口（目录名为 manifest 显式声明）
 │   ├── skills/dev-companion/SKILL.md   # 共享技能（生命周期流程）
-│   ├── agents/                         # companion-developer / companion-checker
-│   ├── references/                     # cli-contract / lifecycle-inputs / zcode-integration
-│   ├── scripts/                        # companion.py + core/journey/releases/archives
+│   ├── agents/                         # developer / checker 两固定角色 + product / design / backend 三按需设计角色
+│   ├── references/                     # cli-contract / lifecycle-inputs / zcode-integration 等
+│   ├── scripts/                        # companion.py + core/journey/releases/archives + _kernel_vendor/
 │   └── examples/                       # demo-project 最小示例 + lifecycle_demo 完整演示
-├── docs/                               # 生命周期实施记录 / 既有评审
-└── tests/                              # Python 回归 + Node 工作流测试
+├── packages/agents_kernel/             # 两插件共享内核（单源，仅标准库）：domain / execution / indexing / services / storage
+├── tools/                              # build_vendor.py（内核分发复制）+ command_registry.py（命令注册表生成）
+├── docs/                               # 实施记录 / verification 阶段验证 / host-contract 宿主探针 / audit 审计基线 / command-registry.md
+└── tests/                              # Python 回归 + Node 工作流与宿主契约测试 + benchmarks（L 档基准）
 ```
 
 ### 本地验证
@@ -354,12 +363,21 @@ agents/
 从仓库根运行：
 
 ```sh
-python3 -m unittest discover -s tests -v
-node --test tests/swarm_workflow.test.mjs
-python3 -m unittest discover -s dev-companion/examples/demo-project -v
+python3 -m unittest discover -s tests -v                                    # Python 回归：564 项（L_TIER 门未设环境变量时 skip 5 项）
+node --test tests/swarm_workflow.test.mjs tests/host/host-contract.test.mjs # Node：57 项（工作流 54 + 宿主契约 3）
+python3 -m unittest discover -s dev-companion/examples/demo-project -v      # 最小示例：4 项
+python3 tools/command_registry.py --check                                   # 命令注册表与命令文件一致（docs/command-registry.md）
 ```
 
-Python 测试覆盖规划草案与失效、状态、完成度、接口检查、发布证据、范围变更、文件快照与恢复故障。Node 测试需要 Node 24，执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回；它不替代真实 ZCode 动态工作流验收。
+修改 `packages/agents_kernel` 后须重建插件内 vendor 副本（副本禁手改，由脚本哈希校验）：
+
+```sh
+python3 tools/build_vendor.py
+```
+
+L 档（10 万条目）容量基准不进常规回归，手动运行：`L_TIER=1 python3 -m unittest tests.benchmarks.test_l_tier -v`。
+
+Python 测试覆盖规划草案与失效、状态、完成度、接口检查、发布证据、范围变更、文件快照与恢复故障，另含共享内核（索引、分片、覆盖账、恢复）与团队编排回归。Node 测试需要 Node 24，执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回；它不替代真实 ZCode 动态工作流验收。
 
 ### 文档索引
 
@@ -369,7 +387,10 @@ Python 测试覆盖规划草案与失效、状态、完成度、接口检查、�
 | [dev-companion/references/cli-contract.md](dev-companion/references/cli-contract.md) | CLI 命令与状态约定（22 个子命令全表） |
 | [dev-companion/references/lifecycle-inputs.md](dev-companion/references/lifecycle-inputs.md) | 六阶段与发布的完整 JSON 输入示例 |
 | [dev-companion/references/zcode-integration.md](dev-companion/references/zcode-integration.md) | ZCode 接入约定与两插件协作分工 |
+| [code-analysis-swarm/README.md](code-analysis-swarm/README.md) | 分析团插件说明（安装 / 组件 / 命令目录 / 测试） |
 | [code-analysis-swarm/DESIGN.md](code-analysis-swarm/DESIGN.md) | 分析团完整设计 |
+| [docs/command-registry.md](docs/command-registry.md) | 全部聊天命令注册表（自动生成，`tools/command_registry.py --check` 校验） |
+| [docs/verification/](docs/verification/) | 阶段验证记录（L 档基准 / 宿主 E2E / 团队端到端等） |
 | [docs/dev-companion-lifecycle.md](docs/dev-companion-lifecycle.md) | 0.2.0 生命周期实施与验证记录 |
 | [docs/dev-companion-review.md](docs/dev-companion-review.md) | 既有评审与旧版验证历史 |
 
@@ -442,10 +463,15 @@ The first six stages are saved as planning records (`journey.json`); development
 | `companion-archive` | "Save these files" / "preview the restore first" | Saves and lists snapshots, previews and confirms restores |
 | `companion-resume` | "Continue from last time" | Reads planning, implementation, checks, releases and open questions, then continues |
 
-No new Agent per stage; only two subagent roles:
+No new Agent per stage; two fixed execution roles plus three on-demand design roles (team mode):
 
 - **companion-developer**: implements one confirmed task package, restricted to `allowed_paths`, reports real artifacts (`implemented` / `verified_existing` / `blocked`). Never accepts on the user's behalf, never refactors on the side, never commits, pushes or deploys.
 - **companion-checker**: independently verifies requirements, flows, the prototype, real features and integration evidence; runs `check --kind feature` / `--kind integration`. Does not modify product code, does not take the developer's word for a check, does not accept or release.
+- **companion-product** (product & feasibility): turns a vague idea into evidence-backed requirement examples and scope (requirement ambiguity flows back here).
+- **companion-design** (UX/UI): produces and freezes a versioned design brief when there is UI / interaction work.
+- **companion-backend** (backend / data / interfaces): produces and freezes API contracts (error codes, idempotency, migration) when interface or data design is needed.
+
+The three design roles are **referenced on demand only — never dispatched without a matching need**; the lightweight mode (developer + checker only) is fully preserved, existing `companion-*` entries unchanged, and no role is mandatory. Design briefs and contracts are cross-reviewed by someone other than their author.
 
 Subagents never spawn subagents; when a role is unavailable but the `Agent` tool exists, the role's full prompt is handed to `general-purpose` to perform the same duty.
 
@@ -547,7 +573,7 @@ Only **explicitly managed** ordinary files are protected (≤20 MiB per file, �
 
 #### Implementation & verification status (2026-09-20)
 
-Verified: Python main suite **106/106**, original demo **4/4**, Node workflow **36/36** (mock host); trace coverage core 94% / journey 100% / releases 99% / archives 89%; the 23-step isolated demo reached `local_verified` with the deployed copy checked by an agent browser; real dispatch of `companion-developer` + independent `companion-checker` passed on desktop. Not yet verified: **a real user's requirement Q&A, prototype experience and software trial**; a real remote deployment (the example's local release does not mean any cloud platform is adapted). Details: [lifecycle implementation record](docs/dev-companion-lifecycle.md); the old version's history: [previous review](docs/dev-companion-review.md).
+Verified: Python main suite **564 passed** (5 more L_TIER long-run benchmark gates skip in a normal discover), minimal demo **4/4**, Node **57/57** (workflow 54 + host contract 3, mock host); 0.2.0-milestone trace coverage core 94% / journey 100% / releases 99% / archives 89% (see the implementation record); the L-tier 100k-entry benchmark has been physically measured ([L-tier acceptance](docs/verification/l-tier-acceptance-2026-09-20.md)); the 23-step isolated demo reached `local_verified` with the deployed copy checked by an agent browser; real dispatch of `companion-developer` + independent `companion-checker` passed on desktop. Not yet verified: **a real user's requirement Q&A, prototype experience and software trial**; a real remote deployment (the example's local release does not mean any cloud platform is adapted). Details: [lifecycle implementation record](docs/dev-companion-lifecycle.md) and [per-phase verification records](docs/verification/); the old version's history: [previous review](docs/dev-companion-review.md).
 
 ---
 
@@ -674,7 +700,7 @@ Appendix: chunking plan, verification records
 /swarm-analyze D:\projects\my-app re-analyze      # starts a new run record
 ```
 
-The dynamic workflow `workflow/code-analysis.dwf.ts` is an **optional** path (params `target` / `team_root` / `output_root` / `run_id`), used only when the host has actually registered and verified DWF; without DWF the command runs the manual SOP with identical artifacts and gates. The Node tests (36) verify its dispatch and structure-rejection logic against a mock host and do not replace real DWF acceptance.
+The dynamic workflow `workflow/code-analysis.dwf.ts` is an **optional** path (params `target` / `team_root` / `output_root` / `run_id`), used only when the host has actually registered and verified DWF; without DWF the command runs the manual SOP with identical artifacts and gates. The Node tests (workflow 54 + host contract 3 = 57) verify its dispatch and structure-rejection logic against a mock host and do not replace real DWF acceptance.
 
 #### Hard constraints at a glance
 
@@ -693,22 +719,26 @@ The dynamic workflow `workflow/code-analysis.dwf.ts` is an **optional** path (pa
 agents/
 ├── marketplace.json                    # ZCode plugin marketplace manifest (repo root = marketplace root)
 ├── code-analysis-swarm/                # Plugin: read-only code analysis swarm 0.2.1
-│   ├── .zcode-plugin/plugin.json
+│   ├── .zcode-plugin/plugin.json       # its commands field explicitly declares the singular command/ dir
+│   ├── README.md                       # Plugin-level quick guide (install / components / commands / tests)
 │   ├── DESIGN.md                       # Full design (roles / gates / contracts / report structure)
 │   ├── agents/                         # a1-scout ~ a7-reporter role prompts
 │   ├── command/swarm-analyze.md        # /swarm-analyze entry (C0 operation manual)
+│   ├── scripts/precheck.py             # precheck & artifact verification helper (stdlib, fixed argv)
 │   └── workflow/code-analysis.dwf.ts   # Optional dynamic workflow
 ├── dev-companion/                      # Plugin: beginner development companion 0.2.0
 │   ├── .zcode-plugin/plugin.json
 │   ├── README.md                       # Beginner guide
-│   ├── commands/                       # Seven companion-* chat entries
+│   ├── commands/                       # Seven companion-* chat entries (dir name declared in the manifest)
 │   ├── skills/dev-companion/SKILL.md   # Shared skill (lifecycle process)
-│   ├── agents/                         # companion-developer / companion-checker
-│   ├── references/                     # cli-contract / lifecycle-inputs / zcode-integration
-│   ├── scripts/                        # companion.py + core/journey/releases/archives
+│   ├── agents/                         # developer / checker fixed roles + product / design / backend on-demand roles
+│   ├── references/                     # cli-contract / lifecycle-inputs / zcode-integration etc.
+│   ├── scripts/                        # companion.py + core/journey/releases/archives + _kernel_vendor/
 │   └── examples/                       # demo-project minimal demo + lifecycle_demo full demo
-├── docs/                               # Lifecycle implementation record / previous review
-└── tests/                              # Python regression + Node workflow tests
+├── packages/agents_kernel/             # Shared kernel for both plugins (single source, stdlib only): domain / execution / indexing / services / storage
+├── tools/                              # build_vendor.py (kernel vendor copy) + command_registry.py (command registry generator)
+├── docs/                               # Implementation records / verification per phase / host-contract probes / audit baselines / command-registry.md
+└── tests/                              # Python regression + Node workflow & host-contract tests + benchmarks (L-tier)
 ```
 
 ### Local verification
@@ -716,12 +746,21 @@ agents/
 From the repository root, run:
 
 ```sh
-python3 -m unittest discover -s tests -v
-node --test tests/swarm_workflow.test.mjs
-python3 -m unittest discover -s dev-companion/examples/demo-project -v
+python3 -m unittest discover -s tests -v                                    # Python regression: 564 tests (5 L_TIER gates skip without the env var)
+node --test tests/swarm_workflow.test.mjs tests/host/host-contract.test.mjs # Node: 57 tests (workflow 54 + host contract 3)
+python3 -m unittest discover -s dev-companion/examples/demo-project -v      # Minimal demo: 4 tests
+python3 tools/command_registry.py --check                                   # Command registry matches the command files (docs/command-registry.md)
 ```
 
-The Python tests cover planning drafts and invalidation, status, completion, interface checks, release evidence, scope changes, file snapshots, and restore failures. The Node test requires Node 24 and executes the real orchestration logic of the TypeScript workflow with simulated host returns; it does not replace real ZCode dynamic-workflow acceptance.
+After changing `packages/agents_kernel`, rebuild the in-plugin vendor copy (never hand-edited; hash-verified by the script):
+
+```sh
+python3 tools/build_vendor.py
+```
+
+The L-tier (100k-entry) capacity benchmark stays out of the normal regression; run it manually with `L_TIER=1 python3 -m unittest tests.benchmarks.test_l_tier -v`.
+
+The Python tests cover planning drafts and invalidation, status, completion, interface checks, release evidence, scope changes, file snapshots, and restore failures, plus shared-kernel (indexing, sharding, coverage ledger, recovery) and team-orchestration regression. The Node test requires Node 24 and executes the real orchestration logic of the TypeScript workflow with simulated host returns; it does not replace real ZCode dynamic-workflow acceptance.
 
 ### Documentation index
 
@@ -731,6 +770,9 @@ The Python tests cover planning drafts and invalidation, status, completion, int
 | [dev-companion/references/cli-contract.md](dev-companion/references/cli-contract.md) | CLI command & status contract (full 22-subcommand table) |
 | [dev-companion/references/lifecycle-inputs.md](dev-companion/references/lifecycle-inputs.md) | Complete JSON input examples for the six stages and releases |
 | [dev-companion/references/zcode-integration.md](dev-companion/references/zcode-integration.md) | ZCode integration conventions and how the two plugins divide work |
+| [code-analysis-swarm/README.md](code-analysis-swarm/README.md) | Swarm plugin guide (install / components / command dir / tests) |
 | [code-analysis-swarm/DESIGN.md](code-analysis-swarm/DESIGN.md) | Full swarm design |
+| [docs/command-registry.md](docs/command-registry.md) | Registry of all chat commands (generated; verified by `tools/command_registry.py --check`) |
+| [docs/verification/](docs/verification/) | Per-phase verification records (L-tier benchmark / host E2E / team end-to-end etc.) |
 | [docs/dev-companion-lifecycle.md](docs/dev-companion-lifecycle.md) | 0.2.0 lifecycle implementation & verification record |
 | [docs/dev-companion-review.md](docs/dev-companion-review.md) | Previous review and the old version's verification history |
