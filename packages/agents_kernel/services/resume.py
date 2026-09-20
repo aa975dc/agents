@@ -4,9 +4,16 @@
 - 续接的依据是持久事实（run_root/.code-analysis-resume.json），不是聊天记忆。
   新会话/新进程打开台账即可知道：有哪些活动（campaign 深读/index_scan 预算扫描/
   integration 集成/custom）、各自状态、检查点在哪、下一步 API 调用是什么。
-- 旧写者围栏（TK03 尾）：登记/心跳/完结都带 writer_epoch 并 CAS 落盘；新会话
-  打开台账即接管（epoch+1、记接管事件），旧 epoch 的任何更新被拒——防僵尸进程
-  双写。接管只围栏写入，不宣称旧进程已停止："超时不等于旧进程已停止"（§4）。
+- 旧写者围栏（TK03 尾；SR-03 修订）：接管+登记+心跳+完结都是"读当前状态→校验
+  持有者身份→分配/变更→落盘提交"的完整序列，整体处于 run_root 级跨进程互斥
+  临界区（atomicio.exclusive_lock 独占锁文件）内——读取/比较/替换不再有互斥窗口。
+  接管身份 = (writer_epoch, writer_owner) 二元组：epoch 单调递增，owner_id 是
+  每个台账对象唯一的进程绑定 id（pid+随机后缀）；写路径在临界区内复查磁盘上的
+  (epoch, owner)，任一不符即拒——两个接管者拿到相同数字 epoch 也无法互覆，
+  旧持有者的心跳/登记/回报一律失效。变更以磁盘最新活动为基（读-改-写同界），
+  已成功登记的活动不会被旧内存快照覆盖丢失。接管只围栏写入，不宣称旧进程已
+  停止："超时不等于旧进程已停止"（§4）。强杀恢复：锁文件按持有者 pid 存活检测
+  接管（陈旧锁不留死锁），台账是单文件 JSON 事实，无半写（原子替换）。
 - 源版本更换策略（IX08 尾）：登记时记录 source_anchor（被分析仓库 HEAD 或
   manifest sha）；resume 时调用方提供当前锚，锚变了该项标 stale_anchor——
   游标绑定的是旧 generation，续跑会把不同 generation 拼成"完整结果"，因此
@@ -26,12 +33,13 @@ import os
 import time
 from pathlib import Path
 
-from agents_kernel.atomicio import write_json
+from agents_kernel.atomicio import exclusive_lock, write_json
 from agents_kernel.validation import CompanionError, text
 
 LEDGER_VERSION = 1
 LEDGER_KIND = "resume_ledger"
 LEDGER_FILENAME = ".code-analysis-resume.json"
+LOCK_FILENAME = LEDGER_FILENAME + ".lock"
 TAKEOVER_LOG = "resume-takeovers.jsonl"
 KIND_CAMPAIGN = "campaign"
 KIND_INDEX_SCAN = "index_scan"
@@ -60,79 +68,105 @@ def _optional_anchor(value):
 
 
 class ResumeLedger:
-    """run_root 级活动台账：登记/心跳/完结 + 续接清单 + epoch 围栏。
+    """run_root 级活动台账：登记/心跳/完结 + 续接清单 + (epoch, owner) 围栏。
 
-    打开即接管：已有台账 → writer_epoch+1 并记接管事件；此后旧 epoch 持有者的
-    register/heartbeat/complete/fail 一律被拒（CAS：落盘前复查文件仍是自己的
-    epoch）。时钟 clock 可注入（默认 time.time 墙钟，跨进程可比）。
+    打开即接管：在互斥临界区内读台账 → writer_epoch+1 + 新 owner_id 并记接管
+    事件；此后旧 (epoch, owner) 持有者的 register/heartbeat/complete/fail 一律
+    被拒（临界区内复查磁盘身份）。时钟 clock 可注入（默认 time.time 墙钟，
+    跨进程可比）。owner_id 可注入（测试用），缺省进程唯一（pid+随机后缀）。
     """
 
-    def __init__(self, path, writer_id, epoch, taken_from, activities, clock):
+    def __init__(self, path, writer_id, epoch, taken_from, activities, clock,
+                 owner_id=None):
         self.path = Path(path)
         self.writer_id = writer_id
         self.epoch = epoch
-        self._taken_from = taken_from     # 接管来源 epoch（新建为 None）：围栏判定用
-        self._activities = activities      # {(kind, id): row dict}
+        self._taken_from = taken_from     # 接管来源 epoch（新建为 None）：审计信息
+        self._taken_from_state = None     # 接管时观察到的 (epoch, owner)：落盘守护放行用
+        self._activities = activities      # {(kind, id): row dict}（最近一次临界区内的磁盘基线）
         self._clock = clock
+        self.owner_id = owner_id if owner_id is not None else _new_owner_id()
 
     @classmethod
     def open(cls, run_root, writer_id, clock=time.time):
-        """打开（或创建）run_root 的续接台账；已有台账则接管（epoch+1）。"""
+        """打开（或创建）run_root 的续接台账；已有台账则在互斥临界区内接管。"""
         writer = text(writer_id, "writer_id")
         path = Path(run_root) / LEDGER_FILENAME
-        previous = cls._read(path)
-        if previous is None:
-            ledger = cls(path, writer, 1, None, {}, clock)
+        with exclusive_lock(path.parent / LOCK_FILENAME):
+            previous = cls._read(path)
+            if previous is None:
+                ledger = cls(path, writer, 1, None, {}, clock)
+                ledger._save()
+                return ledger
+            epoch = int(previous["writer_epoch"]) + 1
+            ledger = cls(path, writer, epoch, int(previous["writer_epoch"]),
+                         dict(previous["activities"]), clock)
+            # 记录接管来源身份：本次落盘就是把"来源状态"原子替换为"我的状态"，
+            # 守护据此放行（epoch+owner 成对核对，两个接管者不可能共享同一 owner）
+            ledger._taken_from_state = (int(previous["writer_epoch"]),
+                                        previous["writer_owner"])
             ledger._save()
+            cls._record_takeover(path.parent, previous, writer, epoch,
+                                 ledger.owner_id, clock())
             return ledger
-        epoch = int(previous["writer_epoch"]) + 1
-        ledger = cls(path, writer, epoch, int(previous["writer_epoch"]),
-                     dict(previous["activities"]), clock)
-        ledger._save()
-        cls._record_takeover(path.parent, previous, writer, epoch, clock())
-        return ledger
 
-    # ---- 登记与更新（全部带 epoch 围栏） ---------------------------------
+    # ---- 登记与更新（互斥临界区内读-改-写，全部带 (epoch, owner) 围栏） ----
 
     def register(self, kind, activity_id, checkpoint_path, schema_version,
                  source_anchor=None):
         """登记一个活动（或同 id 重登为新一次尝试）：status 重置为 running。"""
-        row = self._row(kind, activity_id)
-        now = self._clock()
-        row.update({
-            "checkpoint_path": str(Path(text(checkpoint_path, "checkpoint_path"))),
-            "schema_version": _schema_version(schema_version),
-            "source_anchor": _optional_anchor(source_anchor),
-            "status": STATUS_RUNNING,
-            "registered_at": now, "heartbeat_at": now,
-            "completed_at": None, "failed_at": None, "fail_reason": None,
-        })
-        self._save()
-        return dict(row)
+        checkpoint = str(Path(text(checkpoint_path, "checkpoint_path")))
+        version = _schema_version(schema_version)
+        anchor = _optional_anchor(source_anchor)
+
+        def update():
+            row = self._row(kind, activity_id)
+            now = self._clock()
+            row.update({
+                "checkpoint_path": checkpoint,
+                "schema_version": version,
+                "source_anchor": anchor,
+                "status": STATUS_RUNNING,
+                "registered_at": now, "heartbeat_at": now,
+                "completed_at": None, "failed_at": None, "fail_reason": None,
+            })
+            return dict(row)
+
+        return self._mutate(update)
 
     def heartbeat(self, kind, activity_id, note=None):
         """心跳：只刷新 heartbeat_at（可附 note）；活动仍由各自服务推进。"""
-        row = self._row(kind, activity_id)
         if note is not None and not isinstance(note, str):
             raise CompanionError("note 必须是字符串或 None")
-        row["heartbeat_at"] = self._clock()
-        row["note"] = note
-        self._save()
+
+        def update():
+            row = self._row(kind, activity_id)
+            row["heartbeat_at"] = self._clock()
+            row["note"] = note
+
+        self._mutate(update)
 
     def complete(self, kind, activity_id):
         """完结：status=completed；resume_plan 不再列出该活动。"""
-        row = self._row(kind, activity_id)
-        row["status"] = STATUS_COMPLETED
-        row["completed_at"] = self._clock()
-        self._save()
+
+        def update():
+            row = self._row(kind, activity_id)
+            row["status"] = STATUS_COMPLETED
+            row["completed_at"] = self._clock()
+
+        self._mutate(update)
 
     def fail(self, kind, activity_id, reason):
         """失败：如实记录原因；续接清单会列出它并附原因，不静默消失。"""
-        row = self._row(kind, activity_id)
-        row["status"] = STATUS_FAILED
-        row["failed_at"] = self._clock()
-        row["fail_reason"] = text(reason, "失败原因")
-        self._save()
+        reason = text(reason, "失败原因")
+
+        def update():
+            row = self._row(kind, activity_id)
+            row["status"] = STATUS_FAILED
+            row["failed_at"] = self._clock()
+            row["fail_reason"] = reason
+
+        self._mutate(update)
 
     # ---- 续接清单 --------------------------------------------------------
 
@@ -183,14 +217,28 @@ class ResumeLedger:
         """全部登记行的只读快照（含 completed/failed），按 (kind, id) 排序。"""
         return [dict(self._activities[key]) for key in sorted(self._activities)]
 
-    # ---- 内部：CAS 围栏与读盘 --------------------------------------------
+    # ---- 内部：互斥临界区与 (epoch, owner) 身份围栏 ----------------------
+
+    def _mutate(self, update):
+        """跨进程互斥临界区内的读-改-写：读盘 → 校验持有者身份 → 以磁盘最新
+        活动为基变更 → 落盘提交，全部同界。旧持有者/旧内存快照无法覆盖他人
+        已提交的活动；另一接管者在本临界区内必然看到前者已提交的新 epoch。
+        返回 update 的返回值（如 register 的行快照）。
+        """
+        with exclusive_lock(self.path.parent / LOCK_FILENAME):
+            current = self._read(self.path)
+            if current is not None:
+                self._require_identity(current)
+                self._activities = current["activities"]
+            result = update()
+            self._save()
+            return result
 
     def _row(self, kind, activity_id):
-        """定位（或新建）活动行；任何变更都必须先通过 epoch 围栏。"""
+        """定位（或新建）活动行；只应在 _mutate 的临界区内被调用。"""
         if kind not in KINDS:
             raise CompanionError("kind 必须是 %s 之一：%r" % ("/".join(KINDS), kind))
         aid = text(activity_id, "activity_id")
-        self._require_current_epoch()
         row = self._activities.get((kind, aid))
         if row is None:
             row = {"kind": kind, "id": aid, "writer_epoch": self.epoch,
@@ -198,32 +246,40 @@ class ResumeLedger:
             self._activities[(kind, aid)] = row
         return row
 
-    def _require_current_epoch(self):
-        current = self._read(self.path)
-        if current is not None and not self._epoch_is_mine(int(current["writer_epoch"])):
-            raise CompanionError(
-                "更新被拒：台账已被接管（当前 epoch=%d，本持有者 epoch=%d，writer=%s）——"
-                "旧 epoch 写者不得再写" % (int(current["writer_epoch"]), self.epoch,
-                                      current["writer_id"]))
+    def _identity_is_mine(self, current):
+        """持有者身份：epoch 与 owner_id 同时匹配——数字相同不构成身份。"""
+        return (current["writer_epoch"] == self.epoch
+                and current["writer_owner"] == self.owner_id)
 
-    def _epoch_is_mine(self, on_disk):
-        """围栏判定：磁盘 epoch 是我的，或仍是我接管时的来源 epoch（尚未首次落盘）。"""
-        if on_disk == self.epoch:
-            return True
-        return self._taken_from is not None and on_disk == self._taken_from
+    def _require_identity(self, current):
+        if self._identity_is_mine(current):
+            return
+        raise CompanionError(
+            "更新被拒：台账已被接管（当前 epoch=%d writer=%s owner=%s；本持有者 "
+            "epoch=%d owner=%s）——旧持有者不得再写"
+            % (current["writer_epoch"], current["writer_id"],
+               current["writer_owner"], self.epoch, self.owner_id))
 
     def _save(self):
         payload = {"version": LEDGER_VERSION, "kind": LEDGER_KIND,
                    "writer_id": self.writer_id, "writer_epoch": self.epoch,
+                   "writer_owner": self.owner_id,
                    "activities": [self._activities[key]
                                   for key in sorted(self._activities)]}
 
         def guard():
+            # 纵深防御：临界区内正常只会看到自己的身份，或（接管首次落盘时）
+            # 自己刚读走的来源状态；其余一律视为并发接管，拒绝覆盖。
             current = self._read(self.path)
-            if current is not None and not self._epoch_is_mine(int(current["writer_epoch"])):
-                raise CompanionError(
-                    "落盘被拒：台账已被并发接管（本持有者 epoch=%d）：%s"
-                    % (self.epoch, self.path))
+            if current is None or self._identity_is_mine(current):
+                return
+            if (self._taken_from_state is not None
+                    and (int(current["writer_epoch"]), current["writer_owner"])
+                    == self._taken_from_state):
+                return
+            raise CompanionError(
+                "落盘被拒：台账已被并发接管（本持有者 epoch=%d owner=%s）：%s"
+                % (self.epoch, self.owner_id, self.path))
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         write_json(self.path, payload, before_replace=guard)
@@ -244,6 +300,9 @@ class ResumeLedger:
                 or isinstance(data.get("writer_epoch"), bool)
                 or not isinstance(data.get("writer_id"), str)):
             raise CompanionError("续接台账字段不完整或版本不符：%s" % path)
+        owner = data.get("writer_owner")
+        if owner is not None and not isinstance(owner, str):
+            raise CompanionError("续接台账字段不完整或版本不符：%s" % path)
         activities = {}
         for row in data["activities"]:
             if (not isinstance(row, dict) or row.get("kind") not in KINDS
@@ -251,6 +310,7 @@ class ResumeLedger:
                 raise CompanionError("续接台账活动行形状非法：%r" % (row,))
             activities[(row["kind"], row["id"])] = row
         return {"writer_id": data["writer_id"], "writer_epoch": data["writer_epoch"],
+                "writer_owner": owner,  # 旧格式台账无此字段：None，首个新接管者起必有
                 "activities": activities}
 
     @staticmethod
@@ -262,11 +322,13 @@ class ResumeLedger:
             return None
 
     @staticmethod
-    def _record_takeover(directory, previous, writer, epoch, at):
+    def _record_takeover(directory, previous, writer, epoch, owner_id, at):
         record = {"type": "resume_takeover", "ledger": LEDGER_FILENAME,
                   "from": {"writer_id": previous["writer_id"],
-                           "epoch": int(previous["writer_epoch"])},
-                  "to": {"writer_id": writer, "epoch": epoch}, "at": at}
+                           "epoch": int(previous["writer_epoch"]),
+                           "writer_owner": previous["writer_owner"]},
+                  "to": {"writer_id": writer, "epoch": epoch,
+                         "writer_owner": owner_id}, "at": at}
         line = (json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n") \
             .encode("utf-8")
         fd = os.open(str(Path(directory) / TAKEOVER_LOG),
@@ -275,6 +337,11 @@ class ResumeLedger:
             os.write(fd, line)
         finally:
             os.close(fd)
+
+
+def _new_owner_id():
+    """接管者身份 id：进程唯一（pid + 随机后缀，同进程多对象/跨时pid复用也唯一）。"""
+    return "%d-%s" % (os.getpid(), os.urandom(8).hex())
 
 
 def _cursor_summary(data):
