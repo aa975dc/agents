@@ -311,7 +311,7 @@ try {
     `目标与块文件闭集：${JSON.stringify({ target, chunk: c })}；摘要：${map.tree_summary}。`,
     `本块结果写 ${board}/chunks/${c.id}.json；契约只写 ${board}/interfaces/${c.id}/。`,
     "并行阶段没有已冻结的邻块契约，不依赖其他块完成顺序；跨块不明之处记录 gaps 并退回，不猜测。",
-    "coverage 必含 analyzed_files 精确路径列表和 gaps；抽样/部分读取不能计作完整深读。findings.id 以块 ID 开头；edges 必含 source，from_contract 可选布尔（缺省 false）。",
+    "coverage 必含 analyzed_files 精确路径列表和 gaps；抽样/部分读取不能计作完整深读。findings.id 以块 ID 开头；findings.where 必须为「路径:行号」或「路径:起行-止行」格式（行号取自真实读取位置）；edges 必含 source，from_contract 可选布尔（缺省 false）。",
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 JSON：\n- ${feedback.split("\n").join("\n- ")}` : "",
   ].filter(Boolean).join("\n")), r => validateChunkResult(r, c))));
   // G2 汇总：模块名跨块唯一、依赖边端点可归位（可修复回流，Z03）。
@@ -381,6 +381,7 @@ try {
     `按角色契约写 ${board}/specialty/${kind}.md 及所属图表；返回 DESIGN.md 6.9 的共同摘要（snake_case）。`,
     "A3 不读原始代码；A4/A5 只定点读清单/锁文件/配置；禁止执行安装、构建和项目脚本。",
     "summary/details/findings/claims/module_refs/build_files_covered/not_covered 字段必须齐全；claims 有唯一 ID、source_role 和非空 evidence_refs。未覆盖内容如实声明。",
+    "findings.where 必须为「路径:行号」或「路径:起行-止行」格式，行号取自你实际读取到的位置；没有可引用行号的观察就不作为 finding。",
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 JSON：\n- ${feedback.split("\n").join("\n- ")}` : "",
   ].filter(Boolean).join("\n")), s => validateSpecialty(s, kind))));
   stage = "G3 制品落盘核验";
