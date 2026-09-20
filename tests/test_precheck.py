@@ -298,5 +298,125 @@ class PrecheckTest(unittest.TestCase):
             self.assertEqual(self.stdout_json(out)["kind"], "argument")
 
 
+class ClaimsPagingTest(unittest.TestCase):
+    """claims-write / claims-page（C10）：全量结论落盘 + 有界分页领取。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="claims-page-test-")
+        base = self.tmp.name
+        self.source = os.path.join(base, "src")
+        self.workspace = os.path.join(base, "workspace")
+        os.makedirs(self.source)
+        os.makedirs(self.workspace)
+        self.run_root = os.path.join(self.workspace, "run-001")
+        os.makedirs(self.run_root)
+        self.claims = [
+            {"id": "A3:1", "claim": "架构判定一", "source_role": "A3", "evidence_refs": ["src/a.py:1"]},
+            {"id": "A4:1", "claim": "依赖判定一", "source_role": "A4", "evidence_refs": ["src/a.py:2", "src/b.py:3"]},
+            {"id": "entry-0", "claim": "程序入口", "source_role": "A1", "evidence_refs": ["src/main.py:1"]},
+        ]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def stdout_json(self, out):
+        lines = [line for line in out.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "stdout 应为单行 JSON")
+        return json.loads(lines[0])
+
+    def write_claims(self, claims=None, run_root=None):
+        return run_helper("claims-write", {
+            "run_root": run_root or self.run_root,
+            "claims": self.claims if claims is None else claims,
+        })
+
+    def claims_file(self):
+        return os.path.join(self.run_root, "verification", "claims.json")
+
+    def test_write_creates_file_with_receipt_and_roundtrip(self):
+        code, out, _ = self.write_claims()
+        self.assertEqual(code, 0)
+        data = self.stdout_json(out)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["total"], 3)
+        self.assertEqual(data["claims_file"], os.path.realpath(self.claims_file()))
+        with open(self.claims_file(), "r", encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh), self.claims)
+
+    def test_write_rejects_empty_and_invalid_claims(self):
+        for claims in ([], "not-a-list", [{"id": "x"}],
+                       [{"id": "a", "claim": "c", "source_role": "A3", "evidence_refs": []}],
+                       [{"id": "a", "claim": "c", "source_role": "A3", "evidence_refs": ["a.py:1"]},
+                        {"id": "a", "claim": "c2", "source_role": "A4", "evidence_refs": ["a.py:2"]}]):
+            code, out, _ = self.write_claims(claims=claims)
+            self.assertEqual(code, 2, repr(claims))
+            self.assertEqual(self.stdout_json(out)["kind"], "argument")
+
+    def test_write_rejects_missing_run_root_and_sensitive(self):
+        code, out, _ = self.write_claims(run_root=os.path.join(self.tmp.name, "absent"))
+        self.assertEqual(code, 3)
+        ssh = os.path.join(self.tmp.name, "home", ".ssh", "runs")
+        os.makedirs(ssh)
+        code, out, _ = self.write_claims(run_root=ssh)
+        self.assertEqual(code, 4)
+        self.assertEqual(self.stdout_json(out)["kind"], "sensitive")
+
+    def page(self, page, page_size, claims_file=None, within_root=None):
+        return run_helper("claims-page", {
+            "within_root": within_root or self.run_root,
+            "claims_file": claims_file or self.claims_file(),
+            "page": page,
+            "page_size": page_size,
+        })
+
+    def test_page_returns_requested_slice_with_totals(self):
+        code, _, _ = self.write_claims()
+        self.assertEqual(code, 0)
+        code, out, _ = self.page(0, 2)
+        self.assertEqual(code, 0)
+        data = self.stdout_json(out)
+        self.assertTrue(data["ok"])
+        self.assertEqual((data["total"], data["pages"], data["page"], data["page_size"]), (3, 2, 0, 2))
+        self.assertEqual([c["id"] for c in data["claims"]], ["A3:1", "A4:1"])
+        code, out, _ = self.page(1, 2)
+        data = self.stdout_json(out)
+        self.assertEqual([c["id"] for c in data["claims"]], ["entry-0"])
+
+    def test_page_out_of_range_rejected(self):
+        self.write_claims()
+        for page in (2, 5, -1):
+            code, out, _ = self.page(page, 2)
+            self.assertEqual(code, 2, page)
+            self.assertEqual(self.stdout_json(out)["kind"], "argument")
+
+    def test_page_invalid_page_size_rejected(self):
+        self.write_claims()
+        for size in (0, -3, 501, "80", 2.5):
+            code, out, _ = self.page(0, size)
+            self.assertEqual(code, 2, size)
+            self.assertEqual(self.stdout_json(out)["kind"], "argument")
+
+    def test_page_rejects_escape_and_missing_file(self):
+        self.write_claims()
+        outside = os.path.join(self.source, "claims.json")
+        with open(outside, "w", encoding="utf-8") as fh:
+            fh.write("[]")
+        code, _, _ = self.page(0, 2, claims_file=outside)
+        self.assertEqual(code, 3)
+        code, _, _ = self.page(0, 2, claims_file=os.path.join(self.run_root, "absent.json"))
+        self.assertEqual(code, 3)
+
+    def test_page_rejects_non_array_and_corrupt_content(self):
+        self.write_claims()
+        with open(self.claims_file(), "w", encoding="utf-8") as fh:
+            fh.write('{"not": "array"}')
+        code, _, _ = self.page(0, 2)
+        self.assertEqual(code, 2)
+        with open(self.claims_file(), "wb") as fh:
+            fh.write(b"\xff\xfe not utf8")
+        code, _, _ = self.page(0, 2)
+        self.assertEqual(code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

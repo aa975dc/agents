@@ -12,7 +12,8 @@ Z24 统一入口：凡进入 blocked/cancelled 的状态变更必须走 block()/
 
 本模块只建模型，不写库：对 P2-02 事件库仅提供 to_event_payload()/from_event()
 纯函数桥接（持久化接线归 P5-02）；写隔离/租约归 P5-02/03；旧 require_idle
-串行保护不受影响。
+串行保护不受影响。P5-04：feature 的 review_required policy 开启时，impl/review
+任务的 done 前置独立审查门（G-REVIEW），policy 缺省关闭，旧项目不受影响。
 """
 from agents_kernel.domain.views import EVENT_FEATURE_STATUS, EVENT_TASK_STATUS
 from agents_kernel.validation import CompanionError, relative_path, strings, text
@@ -92,13 +93,19 @@ class TaskBoard:
         self._features = {}
         self._tasks = {}
         self._attempts = {}  # task_id -> [attempt, ...]，attempt_no 从 1 递增
+        # G-REVIEW done 门回调（P5-04：由 ReviewBoard.require_approval 接线）；
+        # 仅当 feature 的 review_required policy 开启时被调用，None = 未接入审查台。
+        self.review_guard = None
 
     # ---- Feature ----
 
-    def add_feature(self, feature_id, title, allowed_paths=()):
+    def add_feature(self, feature_id, title, allowed_paths=(), review_required=False):
+        if not isinstance(review_required, bool):
+            raise CompanionError("review_required 必须是布尔")
         fid = valid_feature_id(feature_id, self._features)
         entry = {"id": fid, "title": text(title, "功能标题"), "status": "draft",
-                 "allowed_paths": [relative_path(p) for p in list(allowed_paths)]}
+                 "allowed_paths": [relative_path(p) for p in list(allowed_paths)],
+                 "review_required": review_required}
         self._features[fid] = entry
         return dict(entry)
 
@@ -160,6 +167,8 @@ class TaskBoard:
             entry_name = {"blocked": "block", "cancelled": "cancel"}[to_status]
             raise CompanionError("进入 %s 必须经统一入口 %s()（Z24）" % (to_status, entry_name))
         check_transition(TASK_TRANSITIONS, entry["status"], to_status, "任务")
+        if to_status == "done":
+            self._gate_done(entry)  # G-REVIEW：done 前置门（仅 policy 开启时生效）
         entry["status"] = to_status
         entry["block_reason"] = None  # blocked → ready 等离开阻断态时清空阻断记录
         entry["blocked_by"] = []
@@ -188,6 +197,19 @@ class TaskBoard:
         entry["blocked_by"] = []
         return self.task(tid)
 
+    def _gate_done(self, entry):
+        """G-REVIEW（P5-04）：feature policy 开启时，impl/review 任务 done 前
+        必须有有效独立审查批准（review_guard 由 ReviewBoard 接线）。
+        policy 缺省关闭：未开启或非 impl/review 任务不经过此门（向后兼容）。"""
+        if entry["kind"] not in ("impl", "review"):
+            return
+        feature = self._features[entry["feature_id"]]
+        if not feature["review_required"]:
+            return
+        if self.review_guard is None:
+            raise CompanionError("功能 %s 要求独立审查，但未接入审查台（G-REVIEW）" % feature["id"])
+        self.review_guard(entry["id"])
+
     # ---- Attempt（TK08：attempt 计数与 Task 最终状态分开） ----
 
     def start_attempt(self, tid, started_at):
@@ -208,6 +230,8 @@ class TaskBoard:
         attempts = self._attempts[tid]
         if not attempts or attempts[-1]["outcome"] != "pending":
             raise CompanionError("任务 %s 没有进行中的 attempt" % tid)
+        if outcome == "succeeded":
+            self._gate_done(entry)  # 先过门再变更：拒绝时不留半套状态
         attempts[-1]["outcome"] = outcome
         attempts[-1]["failure_reason"] = text(failure_reason, "失败原因") if outcome == "failed" else None
         check_transition(TASK_TRANSITIONS, entry["status"], "done" if outcome == "succeeded" else "failed",
