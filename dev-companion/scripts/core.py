@@ -17,6 +17,7 @@ import kernel_bootstrap  # noqa: F401 — P2-05 单处引导：优先本目录 _
 
 from agents_kernel.atomicio import read_json, write_json
 from agents_kernel.digest import content_digest, digest, sha256_file
+from agents_kernel.domain.tasks import check_transition
 from agents_kernel.paths import EXCLUDED_DIRS, realpath, sensitive
 from agents_kernel.process import now, redact_output, run_argv
 from agents_kernel.services.request_cache import RequestCache
@@ -28,6 +29,24 @@ from archives import ArchiveError, pending_restore
 
 class CapacityExceeded(CompanionError):
     """项目超出当前扫描容量上限（Z21 前半）：状态可降级展示，写路径仍硬拒绝。"""
+
+
+# Z24：legacy 五状态转换白名单，校验器与内核 domain.tasks 同一个（check_transition）。
+# → blocked 只能经 block()/feedback() 统一入口进入（显式原因 + 资格失效，与内核
+# "blocked/cancelled 拒绝普通 transition" 同一规则）；其余转换由各入口既有前置把守
+# （packet 要求 confirmed/idle/plan，receipt 要求 running 且 run_id/范围版本/规划指纹
+# 匹配，check 要求 awaiting_review/accepted，accept 要求当前内容的有效检查）。
+# 与内核 Task 状态机的对应与差异：blocked 可再 block（与内核 _BLOCKABLE_FROM 含
+# blocked 一致）；legacy 的 accepted 不是终态（验收后可经 check/packet 打回返工），
+# 内核 Feature 的 accepted 是终态——差异保留，属既有兼容语义。revise() 按范围整体
+# 重置任务为 pending，属范围操作，不经此单任务转换表。
+LEGACY_TRANSITIONS = {
+    "pending": frozenset({"running", "blocked"}),
+    "running": frozenset({"awaiting_review", "blocked"}),
+    "awaiting_review": frozenset({"accepted", "running", "awaiting_review", "blocked"}),
+    "accepted": frozenset({"awaiting_review", "running", "blocked"}),
+    "blocked": frozenset({"running", "blocked"}),
+}
 
 
 class Project:
@@ -421,15 +440,18 @@ class Project:
         note = text(note, "反馈说明")
         with self.locked():
             state = self.load()
+            # Z24：feedback 是返工语义——前提是项目已无在途执行（require_idle），
+            # 否则一边记录"成果要重做"一边还有人正在写入。block 无此前置，差异
+            # 是语义不是不对称，理由见 block() 内注释。
             self.require_idle(state)
             feature, task = self.feature(state, identifier)
+            check_transition(LEGACY_TRANSITIONS, task["status"], "blocked", "任务")
             feedback = {"kind": kind, "note": note, "at": now(), "scope_version": state["scope_version"]}
             if kind == "requirement":
                 feedback["requirement_basis"] = self.requirement_basis(state["scope"], feature)
             task.setdefault("feedback", []).append(feedback)
             task.update(status="blocked", blocker=note)
-            for key in ("acceptance", "verification", "integration"):
-                task.pop(key, None)
+            self._invalidate_eligibility(task)
             self.commit(state, {"kind": "feedback_recorded", "feature_id": identifier, "feedback": feedback})
             return {"revision": state["revision"], "status": "blocked", "feedback": feedback}
 
@@ -438,11 +460,26 @@ class Project:
         with self.locked():
             state = self.load()
             _, task = self.feature(state, identifier)
+            check_transition(LEGACY_TRANSITIONS, task["status"], "blocked", "任务")
+            # Z24：block 不要求 idle（与 feedback 的前置差异是语义不是不对称）——
+            # 阻断是"现在就把受阻事实记下来"，允许对仍在写入的执行做标记。实际
+            # 停止与状态标记分开：本命令不终止任何外部进程，也不假装进程已停；
+            # 执行是否真正停止由人按返回消息核对，后续指纹核验兜底。
             task.update(status="blocked", blocker=reason)
-            task.pop("acceptance", None)
+            self._invalidate_eligibility(task)
             self.commit(state, {"kind": "blocked", "feature_id": identifier, "reason": reason})
             return {"revision": state["revision"], "status": "blocked",
                     "message": "已记录阻塞；此命令不会替你终止外部智能体，请确认实际写入已停止"}
+
+    @staticmethod
+    def _invalidate_eligibility(task):
+        """Z24 统一资格失效（block/feedback 共用，消除两者证据清理的不对称）：
+        清当前验收，并使检查/联调证据引用一并失效。失效的是"当前资格"，不是
+        历史——state.events 只追加（checked/accepted 事件原样保留），journey
+        历史不删；被清的 verification/integration 在重新 check 前不能用于验收
+        或发布。"""
+        for key in ("acceptance", "verification", "integration"):
+            task.pop(key, None)
 
     def status(self, include_release=True, snapshot=None):
         # Z13：本命令是只读的，作用域内 Journey 三次解析/产物重哈希与快照复用为一次；
