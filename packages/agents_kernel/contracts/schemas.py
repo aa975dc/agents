@@ -231,3 +231,41 @@ def validate_review_gate(record):
     elif record.get("verdict") == "changes_requested" and not blockers:
         _add(errors, "blockers", "changes_requested 必须逐条写明阻塞项")
     return errors
+
+
+RECORD_SUBJECT_TYPES = ("attempt", "handoff", "contract")
+
+
+def validate_review_record(record):
+    """审查记录（P5-04）：绑定不可变 subject 的固定版本 sha256，审查者必须
+    以独立 attempt（role + attempt_id）署名——独立性在审查台按 attempt 比对，
+    这里只校验形状；阻塞项规则与联审门一致（approved 不带，changes_requested 逐条）。"""
+    errors = []
+    if not isinstance(record, dict):
+        _add(errors, "", "审查记录必须是 JSON 对象")
+        return errors
+    _check_text(record.get("review_id"), "review_id", errors, "审查记录编号")
+    if record.get("subject_type") not in RECORD_SUBJECT_TYPES:
+        _add(errors, "subject_type", "subject 类型必须是 attempt、handoff 或 contract")
+    _check_text(record.get("subject_ref"), "subject_ref", errors, "被审对象引用")
+    sha = record.get("subject_sha256")
+    if not isinstance(sha, str) or not _SHA256_RE.match(sha):
+        _add(errors, "subject_sha256", "必须是被审对象固定版本的 64 位小写 sha256")
+    reviewer = record.get("reviewer")
+    if not isinstance(reviewer, dict):
+        _add(errors, "reviewer", "审查者必须是 {role, attempt_id} 对象")
+    else:
+        _check_text(reviewer.get("role"), "reviewer.role", errors, "审查者角色")
+        _check_text(reviewer.get("attempt_id"), "reviewer.attempt_id", errors, "审查者 attempt")
+    if record.get("verdict") not in VERDICTS:
+        _add(errors, "verdict", "结论必须是 approved 或 changes_requested")
+    blockers = record.get("blockers")
+    if not isinstance(blockers, list) or not all(
+            isinstance(blocker, str) and blocker.strip() for blocker in blockers):
+        _add(errors, "blockers", "blockers 必须是非空字符串列表（可为空列表）")
+    elif record.get("verdict") == "approved" and blockers:
+        _add(errors, "blockers", "approved 不得携带阻塞项")
+    elif record.get("verdict") == "changes_requested" and not blockers:
+        _add(errors, "blockers", "changes_requested 必须逐条写明阻塞项")
+    _check_text(record.get("reviewed_at"), "reviewed_at", errors, "审查时间")
+    return errors
