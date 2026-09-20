@@ -3,10 +3,18 @@
 构建入口 tools/build_vendor.py 以子进程运行（与 CI/用户同一调用方式）；
 "仓外独立运行"把 dev-companion 复制进 tempfile，从那里引导 scripts 模块，
 断言内核解析到 _kernel_vendor 而非仓库 packages/。
+
+SR-07 证据口径：Git checkout 构建验证与无 .git archive 复核拆成两组，互不冒充——
+- VendorBuildTests：Git checkout 形态（仓库含 .git），commit 断言真实 HEAD SHA；
+  archive 形态下整组 skip（如实注明）。
+- ArchiveFormVendorTests：在临时去 .git 的源码树副本上真实构建，断言显式
+  "archive:<标记>" + provenance=archive_no_git，逐文件哈希仍然校验；同时验证
+  工具拒绝 SHA 形态的 AGENTS_SOURCE_COMMIT（无 .git 时不可验证，禁止伪造）。
 """
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,11 +25,23 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BUILD = REPO / "tools" / "build_vendor.py"
 PLUGIN = "dev-companion"
+ARCHIVE_ENV = "AGENTS_SOURCE_COMMIT"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+ARCHIVE_MARKER = "archive:simulated-test-copy"
+ARCHIVE_PROVENANCE = "archive_no_git"
 
 
-def run_build(root):
+def in_git_checkout():
+    """当前仓库是否 Git checkout 形态（archive 解包形态无 .git）。"""
+    return (REPO / ".git").exists()
+
+
+def run_build(root, env_extra=None):
+    env = dict(os.environ)
+    env.pop(ARCHIVE_ENV, None)          # 缺省剥离，Git checkout 不受外部变量影响
+    env.update(env_extra or {})
     return subprocess.run([sys.executable, str(BUILD), "--root", str(root)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env=env)
 
 
 def tree_hashes(root):
@@ -30,6 +50,21 @@ def tree_hashes(root):
         if path.is_file():
             result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
+
+
+def verify_manifest_integrity(manifest, vendor_dir, source_root):
+    """与形态无关的完整性口径：清单闭合 + 逐文件 sha256/bytes 与副本和源一致。"""
+    listed = {entry["path"] for entry in manifest["files"]}
+    actual = {path.relative_to(vendor_dir).as_posix() for path in vendor_dir.rglob("*")
+              if path.is_file() and path.name != "MANIFEST.json"}
+    assert listed == actual, "MANIFEST 清单与 vendor 目录不闭合"
+    for entry in manifest["files"]:
+        data = (vendor_dir / entry["path"]).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == entry["sha256"], entry["path"]
+        assert len(data) == entry["bytes"], entry["path"]
+        source = source_root / "packages" / entry["path"]
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == entry["sha256"], \
+            entry["path"] + " 副本与源不一致"
 
 
 CHILD = '''
@@ -59,9 +94,16 @@ print("OK " + json.dumps({"kernel": str(agents_kernel.__file__)}))
 
 
 class VendorBuildTests(unittest.TestCase):
+    """Git checkout 形态构建验证（原口径）。archive 形态（源码包无 .git）下本组
+    整组 skip 并注明，由 ArchiveFormVendorTests 覆盖同一构建入口。"""
+
     @classmethod
     def setUpClass(cls):
-        result = subprocess.run([sys.executable, str(BUILD)], capture_output=True, text=True, cwd=str(REPO))
+        if not in_git_checkout():
+            raise unittest.SkipTest(
+                "archive 形态（无 .git）：Git checkout 构建断言（真实 HEAD SHA）不适用，"
+                "archive 口径见 ArchiveFormVendorTests")
+        result = run_build(REPO)
         cls.build_output = result.stdout + result.stderr
         if result.returncode != 0:
             raise AssertionError("构建失败：\n" + cls.build_output)
@@ -92,19 +134,12 @@ class VendorBuildTests(unittest.TestCase):
         self.assertEqual(manifest["manifest_version"], 1)
         self.assertEqual(manifest["target"]["plugin"], PLUGIN)
         self.assertEqual(manifest["target"]["vendor_dir"], PLUGIN + "/scripts/_kernel_vendor")
-        self.assertTrue(manifest["source"]["commit"], "应记录源 commit（git rev-parse HEAD）")
+        self.assertRegex(manifest["source"]["commit"], SHA_RE,
+                         "Git checkout 形态应记录真实 HEAD SHA（git rev-parse）")
+        self.assertNotIn("provenance", manifest["source"],
+                         "Git checkout 形态不得带 archive 标记")
         self.assertTrue(manifest["generated_at"])
-        listed = {entry["path"] for entry in manifest["files"]}
-        actual = {path.relative_to(self.vendor).as_posix() for path in self.vendor.rglob("*")
-                  if path.is_file() and path.name != "MANIFEST.json"}
-        self.assertEqual(listed, actual)
-        for entry in manifest["files"]:
-            data = (self.vendor / entry["path"]).read_bytes()
-            self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"], entry["path"])
-            self.assertEqual(len(data), entry["bytes"], entry["path"])
-            source = REPO / "packages" / entry["path"]
-            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), entry["sha256"],
-                             entry["path"] + " 副本与源不一致")
+        verify_manifest_integrity(manifest, self.vendor, REPO)
 
     def test_rerun_is_idempotent(self):
         before_files = tree_hashes(self.vendor / "agents_kernel")
@@ -138,16 +173,7 @@ class VendorBuildTests(unittest.TestCase):
         self.assertTrue((swarm_vendor / "agents_kernel").is_dir())
         manifest = json.loads((swarm_vendor / "MANIFEST.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["target"]["plugin"], "code-analysis-swarm")
-        listed = {entry["path"] for entry in manifest["files"]}
-        actual = {p.relative_to(swarm_vendor).as_posix() for p in swarm_vendor.rglob("*")
-                  if p.is_file() and p.name != "MANIFEST.json"}
-        self.assertEqual(listed, actual, "swarm MANIFEST 清单与 vendor 目录不闭合")
-        for entry in manifest["files"]:
-            data = (swarm_vendor / entry["path"]).read_bytes()
-            self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"], entry["path"])
-            source = REPO / "packages" / entry["path"]
-            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), entry["sha256"],
-                             entry["path"] + " 副本与源不一致")
+        verify_manifest_integrity(manifest, swarm_vendor, REPO)
 
     def test_version_mismatch_rejects_build(self):
         root = self.sandbox / "repo"
@@ -171,6 +197,71 @@ class VendorBuildTests(unittest.TestCase):
         self.assertIn("版本不一致", result.stderr)
         self.assertIn("dev-companion: 版本不一致 marketplace=1.0.0 plugin.json=0.0.1", result.stderr)
         self.assertFalse((root / PLUGIN / "scripts" / "_kernel_vendor").exists())
+
+
+class ArchiveFormVendorTests(unittest.TestCase):
+    """无 .git archive 形态复核（SR-07）：在临时构造的"源码包解包树"（无 .git）上
+    经同一 tools/build_vendor.py 入口真实构建。证据只认逐文件 sha256 与显式
+    "archive:<标记>"，不要求 git SHA；并验证工具拒绝 SHA 形态声明（禁伪造）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temp.cleanup)
+        root = Path(cls.temp.name) / "archive-src"
+        root.mkdir()
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "_kernel_vendor")
+        shutil.copy2(REPO / "tools" / "build_vendor.py", root / "build_vendor.py")
+        shutil.copy2(REPO / "marketplace.json", root / "marketplace.json")
+        (root / "packages").mkdir()
+        shutil.copytree(REPO / "packages" / "agents_kernel", root / "packages" / "agents_kernel",
+                        ignore=ignore)
+        for plugin in ("dev-companion", "code-analysis-swarm"):
+            shutil.copytree(REPO / plugin, root / plugin, ignore=ignore)
+        cls.root = root
+        cls.vendor = root / PLUGIN / "scripts" / "_kernel_vendor"
+
+    def run_archive_build(self, marker):
+        """以 archive 树自带的 tools 脚本构建一次（用户解包后运行的真实方式）；
+        marker=None 表示不设 AGENTS_SOURCE_COMMIT（缺省口径）。"""
+        env = dict(os.environ)
+        env.pop(ARCHIVE_ENV, None)
+        if marker is not None:
+            env[ARCHIVE_ENV] = marker
+        return subprocess.run([sys.executable, str(self.root / "build_vendor.py"),
+                               "--root", str(self.root)],
+                              capture_output=True, text=True, env=env)
+
+    def build_archive(self, marker):
+        result = self.run_archive_build(marker)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("archive_no_git", result.stdout, "构建输出应注明 archive provenance")
+        return json.loads((self.vendor / "MANIFEST.json").read_text(encoding="utf-8"))
+
+    def test_archive_manifest_honest_marker_and_hashes_still_verified(self):
+        manifest = self.build_archive(ARCHIVE_MARKER)
+        self.assertEqual(manifest["source"]["commit"], ARCHIVE_MARKER,
+                         "archive 形态 commit 必须是显式传入的诚实标记")
+        self.assertEqual(manifest["source"]["provenance"], ARCHIVE_PROVENANCE)
+        self.assertFalse(SHA_RE.match(manifest["source"]["commit"]),
+                         "archive 形态不得出现具体 SHA（无 .git 不可验证）")
+        verify_manifest_integrity(manifest, self.vendor, REPO)
+
+    def test_archive_without_env_defaults_to_archive_none(self):
+        manifest = self.build_archive(None)
+        self.assertEqual(manifest["source"]["commit"], "archive:none")
+        self.assertEqual(manifest["source"]["provenance"], ARCHIVE_PROVENANCE)
+
+    def test_archive_rejects_sha_shaped_claim(self):
+        """禁伪造保证：无 .git 时传入 40 位 SHA（哪怕是真实候选 SHA）一律拒绝构建，
+        任何位置都不得落出含具体 SHA 的 MANIFEST。"""
+        result = self.run_archive_build("1a7bc6986b9f24109381eb8e31c60cb65a3459a9")
+        self.assertNotEqual(result.returncode, 0, "SHA 形态声明必须被拒绝")
+        self.assertIn("archive:", result.stderr)
+        for manifest_path in self.root.rglob("MANIFEST.json"):
+            commit = json.loads(manifest_path.read_text(encoding="utf-8"))["source"]["commit"]
+            self.assertFalse(SHA_RE.match(commit),
+                             "拒绝路径不得落出含具体 SHA 的 MANIFEST：%s" % manifest_path)
 
 
 if __name__ == "__main__":

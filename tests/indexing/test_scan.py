@@ -6,6 +6,7 @@ keyset 分页只读（Z04 扫描半 / IX01-03 / FS04-05）。
 """
 import builtins
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,11 @@ from agents_kernel.validation import CompanionError
 
 MIB = 1024 * 1024
 EXTRA_EXCLUDED = {"scratch"}
+# SR-07：git 场景用例的 skip 依据是"系统是否装有 git 二进制"（扫描器需要 git
+# 读取其输出），不是"候选目录是否 .git 仓库"——archive 解包形态下装了 git 也必须
+# 真实执行。场景树由 build_git_tree 在 tempfile 内 git init 构造，属测试自身
+# fixture（扫描器的合法输入），与候选来源冒充无关。
+GIT_AVAILABLE = shutil.which("git") is not None
 
 
 class _OpenCounter:
@@ -168,7 +174,7 @@ class PlainScanTests(ScanTestBase):
 
 
 class GitScanTests(ScanTestBase):
-    @unittest.skipUnless(walk.detect_mode(REPO_ROOT) == "git", "需要 git 二进制")
+    @unittest.skipUnless(GIT_AVAILABLE, "需要系统 git 二进制")
     def test_git_scan_tracked_untracked_missing_and_names(self):
         expected_files, expected_excluded = self.build_git_tree()
         counter = self.zero_open()

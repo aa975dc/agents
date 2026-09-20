@@ -17,6 +17,10 @@
      源里已删除的目标残留文件清理并报告。
   4. 校验：源与副本逐字节（sha256+字节数）核对，不一致即失败。
   5. 清单：vendor/MANIFEST.json 记录源 commit、文件清单+sha256、生成时间、目标插件。
+     证据口径（SR-07）：Git checkout 记录真实 HEAD SHA；无 .git（源码包 archive
+     形态）时记录显式传入的 "archive:<标记>"（环境变量 AGENTS_SOURCE_COMMIT，
+     缺省 archive:none）并在 source.provenance 写 archive_no_git——具体 SHA 在
+     无 .git 时不可验证，工具不接受也不伪造，收到一律 exit 2。
 
 幂等：对同一源重复运行，内核文件字节不变（仅 generated_at 随运行刷新）。
 纯标准库，Python 3.9+。退出码：0 成功；1 版本门禁拒绝；2 环境/校验错误。
@@ -24,6 +28,7 @@
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,6 +42,8 @@ MANIFEST_NAME = "MANIFEST.json"
 PLUGIN_DIRS = ("dev-companion", "code-analysis-swarm")
 EXCLUDED_DIRS = {"__pycache__"}
 EXCLUDED_SUFFIXES = (".pyc",)
+ARCHIVE_ENV = "AGENTS_SOURCE_COMMIT"
+ARCHIVE_PROVENANCE = "archive_no_git"
 
 
 class BuildError(Exception):
@@ -109,7 +116,28 @@ def git_commit(root):
     return result.stdout.strip() or None
 
 
-def build_vendor(root, plugin_dir, commit):
+def resolve_source_commit(root):
+    """来源标识（SR-07 证据口径，Git 与 archive 两种形态分开）：
+
+    - Git checkout：取 git rev-parse HEAD 的真实 SHA，不加 provenance（既有
+      MANIFEST 字节不变）。
+    - archive 形态（无 .git）：只接受调用方经环境变量 %s 显式传入、且以
+      "archive:" 开头的诚实标记（如 archive:<zip名> 或 archive:none）；任何
+      具体 SHA 在无 .git 时都不可验证，工具既不生成也不接受，收到一律拒绝
+      构建（exit 2）。缺省填 archive:none。返回 (commit, provenance)。
+    """ % ARCHIVE_ENV
+    commit = git_commit(root)
+    if commit is not None:
+        return commit, None
+    claimed = os.environ.get(ARCHIVE_ENV, "").strip()
+    if claimed and not claimed.startswith("archive:"):
+        raise BuildError(
+            "%s 必须是以 'archive:' 开头的诚实标记（如 archive:<zip名> 或 archive:none）；"
+            "无 .git 时具体 SHA 不可验证，拒绝接受：%r" % (ARCHIVE_ENV, claimed))
+    return (claimed or "archive:none"), ARCHIVE_PROVENANCE
+
+
+def build_vendor(root, plugin_dir, commit, provenance=None):
     """同步一份内核副本并写 MANIFEST；返回 (变更文件, 清理文件, 文件数)。"""
     source = root / SOURCE_REL
     vendor_dir = root / plugin_dir / "scripts" / VENDOR_DIRNAME
@@ -149,10 +177,13 @@ def build_vendor(root, plugin_dir, commit):
         if digest != entry["sha256"] or size != entry["bytes"]:
             raise BuildError("校验失败：%s %s 与源不一致" % (plugin_dir, entry["path"]))
 
+    source = {"path": SOURCE_REL, "commit": commit}
+    if provenance:
+        source["provenance"] = provenance
     manifest = {
         "manifest_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "source": {"path": SOURCE_REL, "commit": commit},
+        "source": source,
         "target": {"plugin": plugin_dir,
                    "vendor_dir": (plugin_dir + "/scripts/" + VENDOR_DIRNAME)},
         "files": entries,
@@ -179,7 +210,7 @@ def main(argv=None):
         if not (root / SOURCE_REL).is_dir():
             print("缺少源目录：%s" % (root / SOURCE_REL), file=sys.stderr)
             return 2
-        commit = git_commit(root)
+        commit, provenance = resolve_source_commit(root)
         for plugin_dir in PLUGIN_DIRS:
             if not (root / plugin_dir).is_dir():
                 print("跳过 %s：插件目录不存在" % plugin_dir)
@@ -187,9 +218,10 @@ def main(argv=None):
             if not uses_kernel(root / plugin_dir):
                 print("跳过 %s：未发现 agents_kernel 依赖，不生成 vendor" % plugin_dir)
                 continue
-            changed, removed, total = build_vendor(root, plugin_dir, commit)
-            print("%s: vendor 就绪 %s/scripts/%s（%d 个文件，源 commit %s）"
-                  % (plugin_dir, plugin_dir, VENDOR_DIRNAME, total, commit or "未知（非 git 仓库）"))
+            changed, removed, total = build_vendor(root, plugin_dir, commit, provenance)
+            print("%s: vendor 就绪 %s/scripts/%s（%d 个文件，源 commit %s%s）"
+                  % (plugin_dir, plugin_dir, VENDOR_DIRNAME, total, commit,
+                     "，provenance=%s" % provenance if provenance else ""))
             if changed:
                 print("  与源不一致，已覆盖：%s" % ", ".join(changed))
             if removed:

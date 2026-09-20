@@ -9,6 +9,7 @@
 插桩经 tests/closure_r05/instrument.py 注入子进程环境，不改产品代码。
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -150,14 +151,34 @@ class TeamStatusReadsOnlyFactStore(CliProjectCase):
 
 class InstrumentAttribution(CliProjectCase):
     def test_rules_order_facts_before_source_and_cover_unresolved_path(self):
-        rules = build_rules("/var/folders/x/proj", ["/repo/pkg"])
+        """SR-07：改用可控临时 symlink 场景断言 realpath 双拼写语义，不再依赖
+        macOS /var→/private/var 特例——core 对项目根 realpath、team 模块不解析
+        symlink，两类拼写都必须被插桩规则覆盖（Linux/CI 同样成立）。"""
+        real_root = Path(self.make_temp()) / "real-proj"
+        real_root.mkdir(parents=True)
+        link_root = real_root.parent / "link-proj"
+        link_root.symlink_to(real_root, target_is_directory=True)
+        rules = build_rules(str(link_root), [str(REPO / "packages")])
         facts_prefixes = [rule["prefix"] for rule in rules if rule["category"] == "facts"]
         self.assertTrue(facts_prefixes and facts_prefixes[0].endswith("/.dev-companion"),
                         "facts（.dev-companion）必须排最前")
         self.assertEqual(rules[0]["category"], "facts")
         self.assertTrue(any(rule["category"] == "source_tree" for rule in rules))
+        resolved = os.path.realpath(str(link_root))
+        self.assertTrue(any(rule["prefix"].startswith(resolved) for rule in rules),
+                        "core realpath 解析后的拼写必须被覆盖")
+        self.assertTrue(any(rule["prefix"].startswith(str(link_root)) for rule in rules),
+                        "team 模块不解析 symlink 的原始拼写必须被覆盖")
+
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "macOS 特例断言：/var→/private/var realpath 拼写只在 darwin 成立；"
+                         "其余平台跳过（同一 realpath 语义已由上一用例的可控 symlink 场景覆盖）")
+    def test_darwin_var_realpath_spelling_covered(self):
+        """原 macOS 口径保留在本平台条件用例中：/var/folders 路径必须同时覆盖
+        /private/var（core realpath）与 /var/（team 原始拼写）两类前缀。"""
+        rules = build_rules("/var/folders/x/proj", ["/repo/pkg"])
         self.assertTrue(any("/private/var" in rule["prefix"] for rule in rules),
-                         "core realpath 拼写（/private/var）必须被覆盖")
+                        "core realpath 拼写（/private/var）必须被覆盖")
         self.assertTrue(any(rule["prefix"].startswith("/var/") for rule in rules),
                          "team 模块不解析 symlink 的原始拼写必须被覆盖")
 
