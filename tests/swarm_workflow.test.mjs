@@ -22,10 +22,9 @@ async function run(options = {}) {
     chunks: files.map((file, i) => ({ id: `chunk-${i}`, files: [file], loc_est: 10, neighbors: [], rationale: 'fixture' })),
   };
   const calls = [], cards = [], publications = [], worldCalls = [];
-  let claims = [];
   // world.run 桩：伪造真实宿主返回结构 {exitCode, stdout, stderr}。
   // 首参恒为字面量 "python3"，子命令与 JSON 输入在 args 数组里（无 shell 拼接）。
-  const state = { planExit: 0, acquireExit: 0, acquireStdout: null, verifyExit: 0, reportExit: 0, mutateAcquire: null, mutateInspect: null, missingArtifacts: null };
+  const state = { planExit: 0, acquireExit: 0, acquireStdout: null, verifyExit: 0, reportExit: 0, mutateAcquire: null, mutateInspect: null, missingArtifacts: null, claimsWriteExit: 0, claimsPageExit: 0, claimsWritten: null };
   options.world?.(state);
   const worldRoots = payload => ({
     source_root: { input: payload.source_root, realpath: payload.source_root, lstat_kind: 'directory' },
@@ -64,6 +63,19 @@ async function run(options = {}) {
       state.mutateInspect?.(inspect);
       return { exitCode: 0, stdout: JSON.stringify(inspect), stderr: '' };
     }
+    if (argv[1] === 'claims-write') {
+      // C10 送验结论落盘桩：存下 claims 供断言与分页，回执含 total 与落盘路径。
+      if (state.claimsWriteExit) return { exitCode: state.claimsWriteExit, stdout: '', stderr: 'mock claims write failure' };
+      state.claimsWritten = payload.claims;
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, claims_file: `${payload.run_root}/verification/claims.json`, total: payload.claims.length }), stderr: '' };
+    }
+    if (argv[1] === 'claims-page') {
+      // Z08 分片领取桩：按 page/page_size 切 claims-write 落盘的同一数组，回执结构与真实 helper 一致。
+      if (state.claimsPageExit) return { exitCode: state.claimsPageExit, stdout: '', stderr: 'mock claims page failure' };
+      const all = state.claimsWritten ?? [];
+      const pages = Math.ceil(all.length / payload.page_size);
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, claims_file: payload.claims_file, total: all.length, pages, page: payload.page, page_size: payload.page_size, claims: all.slice(payload.page * payload.page_size, (payload.page + 1) * payload.page_size) }), stderr: '' };
+    }
     throw new Error(`Unexpected world.run subcommand ${argv[1]}`);
   } };
   const askCounts = new Map();
@@ -92,22 +104,23 @@ async function run(options = {}) {
       options.specialty?.(s, role); return s;
     }
     if (name === '交叉验证员·铁证如') {
-      // 回流修复 ask 不含送验清单，此时沿用上一次解析出的 claims。
-      const marker = '逐条复查全部结论 ';
+      // Z08 真分片契约：每次 ask 只携带该批原文（独立 JSON 行），返回仅该批 ID 的 verdicts。
+      const marker = '本批送验结论原文如下：\n';
       const at = prompt.indexOf(marker);
-      if (at >= 0) claims = JSON.parse(prompt.slice(at + marker.length).split('。\n')[0]);
-      const r = { verdicts: claims.map(c => ({ claim_id: c.id, verdict: 'confirmed', note: 'read independently', own_evidence: `${files[0]}:2` })) };
-      options.verdicts?.(r); return r;
+      assert(at >= 0, 'A6 prompt 应携带本批 claims 原文');
+      const pageClaims = JSON.parse(prompt.slice(at + marker.length).split('\n')[0]);
+      const r = { verdicts: pageClaims.map(c => ({ claim_id: c.id, verdict: 'confirmed', note: 'read independently', own_evidence: `${files[0]}:2` })) };
+      options.verdicts?.(r, pageClaims); return r;
     }
     if (name === '报告撰写员·文汇章') {
-      const r = { path: `${board}/report/analysis-report.md`, summary: 'Fixture analysis report', sections: [0,1,2,3,4,5,6,7,8], claim_ids: claims.map(c => c.id) };
+      const r = { path: `${board}/report/analysis-report.md`, summary: 'Fixture analysis report', sections: [0,1,2,3,4,5,6,7,8], claim_ids: (state.claimsWritten ?? []).map(c => c.id) };
       options.report?.(r); return r;
     }
     throw new Error(`Unexpected agent ${name}`);
   } });
   const artifact = { board() {}, async markdown(...args) { publications.push(['markdown', ...args]); }, async file(...args) { if (options.publishFailure) throw new Error('artifact missing'); publications.push(['file', ...args]); } };
   const result = await execute(args, agent, artifact, () => {}, card => cards.push(card), () => {}, world);
-  return { result, calls, cards, publications, claims, worldCalls };
+  return { result, calls, cards, publications, claims: (state.claimsWritten ?? []).map(c => c.id), worldCalls, state };
 }
 
 test('full workflow uses snake_case artifacts and preserves >24 chunks / >20 claims', async () => {
@@ -118,6 +131,84 @@ test('full workflow uses snake_case artifacts and preserves >24 chunks / >20 cla
   assert.equal(claims.length, 31);
   assert.equal(result.coverage.confirmed, 31);
   assert.equal(calls.filter(c => c.name.startsWith('模块深读员·')).length, 27);
+});
+
+// —— C10/CV01+Z08：A6 真分片——claims 原文经 helper 落盘，工作流逐批领取、按批 ask 同一 A6 ——
+test('G4 shards claims: workflow pages through the helper and asks A6 once per page', async () => {
+  const { result, calls, worldCalls, state } = await run({ chunks: 27 });
+  assert.equal(result.status, 'complete');
+  const write = worldCalls.find(w => w[1][1] === 'claims-write');
+  assert(write, '应先经 precheck claims-write 落盘送验结论');
+  const written = JSON.parse(write[1][3]);
+  assert.equal(written.run_root, '/reports/run-001');
+  assert.equal(written.claims.length, 31);
+  assert.equal(state.claimsWritten.length, 31);
+  const pageCalls = worldCalls.filter(w => w[1][1] === 'claims-page');
+  assert.equal(pageCalls.length, 1, '31 条 ≤ 单页，只领取一批（向后兼容单次行为）');
+  const pagePayload = JSON.parse(pageCalls[0][1][3]);
+  assert.equal(pagePayload.page, 0);
+  assert.equal(pagePayload.page_size, 80);
+  assert.equal(pagePayload.within_root, '/reports/run-001');
+  assert.equal(pagePayload.claims_file, '/reports/run-001/verification/claims.json');
+  const a6 = calls.filter(c => c.name === '交叉验证员·铁证如');
+  assert.equal(a6.length, 1);
+  assert(a6[0].prompt.includes('共 31 条、分 1 批'));
+  assert(a6[0].prompt.includes('最后一批'), '单批即最后一批，应指示写 verdicts.json');
+  assert(a6[0].prompt.includes('/reports/run-001/verification/verdicts.json'));
+  assert(!a6[0].prompt.includes('claims-page'), '领取职责在工作流侧，A6 不再自取分页');
+});
+
+test('claims-page failure blocks before any verdict is accepted', async () => {
+  const { result, calls } = await run({ world: w => { w.claimsPageExit = 2; } });
+  assert.equal(result.status, 'blocked');
+  assert.match(result.conclusion, /第 1 批领取失败/);
+  assert(!calls.some(c => c.name === '交叉验证员·铁证如'));
+});
+
+test('A6 true sharding: 204 claims over 3 pages, one ask per page, merged result closes', async () => {
+  const { result, calls, worldCalls } = await run({ chunks: 200 });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.coverage.verdicts, 204);
+  assert.equal(result.coverage.confirmed, 204);
+  assert.deepEqual(
+    worldCalls.filter(w => w[1][1] === 'claims-page').map(w => JSON.parse(w[1][3]).page),
+    [0, 1, 2], '工作流按 0/1/2 逐批领取');
+  const a6 = calls.filter(c => c.name === '交叉验证员·铁证如');
+  assert.equal(a6.length, 3, '每批一次 ask，同一实例共 3 次');
+  const marker = '本批送验结论原文如下：\n';
+  const pageOf = c => JSON.parse(c.prompt.slice(c.prompt.indexOf(marker) + marker.length).split('\n')[0]);
+  assert.deepEqual(a6.map(pageOf).map(p => p.length), [80, 80, 44]);
+  assert(!a6[0].prompt.includes('finding:chunk-100:1'), '第 1 批不得携带其他批的 claim');
+  assert(a6[1].prompt.includes('finding:chunk-100:1'));
+  assert(!a6[2].prompt.includes('finding:chunk-0:1'), '第 3 批不得重复第 1 批的 claim');
+  assert(a6[2].prompt.includes('最后一批'));
+  assert.equal(result.claim_verdicts.length, 204, '全部批合并后逐 ID 闭合');
+});
+
+test('A6 page cap pauses with honest partial instead of pretending completion', async () => {
+  const { result, calls, worldCalls } = await run({ chunks: 4100 });
+  // 4100 块 → 3 专项 + 1 入口 + 4100 高严重度发现 = 4104 条 → 52 批 > 上限 50。
+  assert.equal(result.status, 'partial');
+  assert.equal(worldCalls.filter(w => w[1][1] === 'claims-page').length, 50);
+  const a6 = calls.filter(c => c.name === '交叉验证员·铁证如');
+  assert.equal(a6.length, 50, '只派发前 50 批');
+  assert(a6[49].prompt.includes('最后一批'), '截断处仍指示落盘已复核批次');
+  assert.equal(result.coverage.verdicts, 4104);
+  assert.equal(result.coverage.confirmed, 4000);
+  assert.equal(result.coverage.unverified, 104);
+  assert(result.not_covered.some(s => s.includes('A6 分页超上限，剩余 104 条未复核')),
+    'not_covered 必须如实注明未复核条数');
+  const pending = result.claim_verdicts.filter(c => c.verdict === 'unverified');
+  assert.equal(pending.length, 104);
+  assert(pending.every(c => c.claim_id.startsWith('finding:chunk-')), '截断只落在尾批的发现类结论');
+  assert.equal(result.findings.find(f => f.id === 'chunk-4050:1').status, 'unverified');
+});
+
+test('claims-write failure blocks before A6 is dispatched', async () => {
+  const { result, calls } = await run({ world: w => { w.claimsWriteExit = 2; } });
+  assert.equal(result.status, 'blocked');
+  assert.match(result.conclusion, /送验结论落盘失败/);
+  assert(!calls.some(c => c.name === '交叉验证员·铁证如'));
 });
 
 test('portable explicit team root reaches all seven role prompts', async () => {
@@ -232,6 +323,57 @@ test('from_contract is schema-checked: wrong type flows back, absent field defau
   const asks = calls.filter(c => c.name === '模块深读员·chunk-1');
   assert.equal(asks.length, 2);
   assert.match(asks[1].prompt, /from_contract 必须是布尔/);
+});
+
+// —— Z19 尾：多块 fixture——跨块模块名冲突、依赖边端点闭合走 G2 汇总闸门 ——
+test('cross-block duplicate module names flow back through the G2 aggregate gate', async () => {
+  const { result, calls } = await run({ chunks: 2, chunk(r, id, attempt) { if (attempt === 1) r.modules[0].name = 'shared-module'; } });
+  assert.equal(result.status, 'complete');
+  for (const id of ['chunk-0', 'chunk-1']) {
+    const asks = calls.filter(c => c.name === `模块深读员·${id}`);
+    assert.equal(asks.length, 2, `${id} 应回流重问`);
+    assert.match(asks[1].prompt, /模块名跨块重复：shared-module/);
+    assert.match(asks[1].prompt, /当前模块全集/);
+  }
+  assert.deepEqual(calls.filter(c => c.name.startsWith('模块深读员·')).length, 4, '两个受影响块各重问一次');
+});
+
+test('cross-block dependency edge closes against the merged module set without reflow', async () => {
+  const { result, calls } = await run({ chunks: 2, chunk(r, id) {
+    if (id === 'chunk-1') r.edges = [{ from: 'chunk-1', to: 'chunk-0', kind: 'import', source: '/repos/app/file-1.js:3' }];
+  } });
+  assert.equal(result.status, 'complete');
+  assert.equal(calls.filter(c => c.name === '模块深读员·chunk-1').length, 1, '跨块边端点可归位，无需回流');
+});
+
+test('edge endpoint outside the module set flows back and recovers', async () => {
+  const { result, calls } = await run({ chunks: 2, chunk(r, id, attempt) {
+    if (id !== 'chunk-1') return;
+    if (attempt === 1) r.edges = [{ from: 'chunk-1', to: 'ghost-module', kind: 'import', source: '/repos/app/file-1.js:3' }];
+  } });
+  assert.equal(result.status, 'complete');
+  const asks = calls.filter(c => c.name === '模块深读员·chunk-1');
+  assert.equal(asks.length, 2);
+  assert.match(asks[1].prompt, /依赖边端点不能归位：chunk-1->ghost-module/);
+  assert.match(asks[1].prompt, /当前模块全集/);
+});
+
+// —— Z08/A7 减负：prompt 只带汇总统计与黑板指针，明细按需读 ——
+test('A7 prompt carries summary stats and blackboard pointers instead of full verdict payloads', async () => {
+  const { result, calls } = await run({ chunks: 3, verdicts(r) {
+    const first = r.verdicts[0];
+    r.verdicts[0] = { ...first, verdict: 'unverified', own_evidence: '', note: 'cannot read file' };
+  } });
+  assert.equal(result.status, 'partial');
+  const a7 = calls.find(c => c.name === '报告撰写员·文汇章');
+  assert(a7, 'A7 应被派发');
+  assert(!a7.prompt.includes('read independently'), 'verdicts 明细（note/own_evidence）不得进入 A7 prompt');
+  assert(!a7.prompt.includes('cannot read file'), 'unverified 复查原因明细不得进入 A7 prompt');
+  assert(a7.prompt.includes('confirmed 6 / refuted 0 / unverified 1'), '应给汇总统计');
+  assert(a7.prompt.includes('逐条状态'), '应给逐 ID 状态紧凑清单');
+  assert(a7.prompt.includes('/reports/run-001/verification/verdicts.json'), '应指明 verdicts 明细的黑板路径');
+  assert(a7.prompt.includes('"excluded":{"count":0'), 'notCovered 应为紧凑摘要');
+  assert(result.not_covered.some(s => s.includes('cannot read file')), '返回值 not_covered 仍保留完整明细');
 });
 
 test('G3 rejects missing build coverage', async () => {

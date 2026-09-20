@@ -148,9 +148,13 @@ function claimsValid(claims: Claim[]) {
 //   硬阻断（路径逃逸/权限/未知副作用等普通 Error，或与上一次完全相同的失败复发）→ 立即抛出 blocked。
 // askBudget/lastFailure 按代理名全局记账：同一实例的修复尝试不因换闸门而重置额度。
 const MAX_REPAIRS = 2;
-// C10/CV01：送验结论分页领取的批次大小。全量 claims 原文先经 precheck claims-write
-// 落盘，A6 用 precheck claims-page 逐批领取复核，禁止把全部 claims stringify 进 prompt。
+// C10/CV01+Z08：全量 claims 原文先经 precheck claims-write 落盘（单文件有 20MiB 上限），
+// 工作流经 claims-page 逐批领取后按批派发同一 A6 实例——每次 ask 的载荷上限即一页
+// （≤CLAIM_PAGE_SIZE 条），协调者与 A6 都不一次接收全量 claims。
 const CLAIM_PAGE_SIZE = 80;
+// Z08 批数上限（预算暂停语义）：批数超过它时不再继续派发，已复核批次照常采纳，
+// 剩余送验结论如实记 unverified 并写入 not_covered，不假装完成（CV03/CV04）。
+const MAX_CLAIM_PAGES = 50;
 // 宿主禁止对 agent 取引用（含 typeof），也禁止重定型为本地结构接口（逃逸站点标识）；
 // 缓存必须以 facade 自己的 Agent 接口类型持有，ask 调用点才可被日志/重放定位。
 const actorCache = new Map<string, Agent>();
@@ -417,39 +421,76 @@ try {
     ...findings.filter(f => f.severity === "high").map(f => ({ id: `finding:${f.id}`, claim: `${f.what}（${f.where}）`, source_role: "A2", evidence_refs: [f.where, f.evidence] })),
   ];
   claimsValid(toVerify);
-  // C10/CV01：全量 claims 原文不再 stringify 进 prompt——先经 helper 落盘为分页文件，
-  // A6 用 claims-page 子命令逐批领取、复核全部批；严禁限取前 N 条的约束改为
-  // "批数有限、逐批领取、禁止跳批"，闸门仍按全部 claim ID sameSet 闭合。
+  // Z08 真分片：A6 不再一次 ask 领全部页——工作流经 claims-page 逐批领取，按批多次 ask
+  // 同一 A6 实例（actor 名稳定，上下文续接），每 ask 只携带该批原文与累计要求；每批返回
+  // 该批 verdicts，全部批合并后按送验 ID sameSet 闭合（CV03）。批数超过 MAX_CLAIM_PAGES
+  // 时预算暂停：已复核批次照常采纳，剩余 N 条由工作流如实记 unverified（"未复核"）并
+  // 写入 not_covered，不假装完成。批数 ≤1 时循环只走一批，与旧单次行为一致（向后兼容）。
   const claimsWrite = await world.run("python3", [helperPath, "claims-write", "--json", JSON.stringify({ run_root: board, claims: toVerify })]);
   requireThat(claimsWrite.exitCode === 0, `送验结论落盘失败（exit ${claimsWrite.exitCode}）：${diag(claimsWrite)}`);
   const claimsReceipt = JSON.parse(claimsWrite.stdout);
   requireThat(claimsReceipt?.ok === true && claimsReceipt.total === toVerify.length && nonempty(claimsReceipt.claims_file), "送验结论落盘回执无效");
   const claimsFile = claimsReceipt.claims_file;
   const claimPages = Math.ceil(toVerify.length / CLAIM_PAGE_SIZE);
-  function validateVerdicts(vs: Verdict[]): void {
+  const a6Name = "交叉验证员·铁证如";
+  const pagesToRun = Math.min(claimPages, MAX_CLAIM_PAGES);
+  const pageCapHit = claimPages > MAX_CLAIM_PAGES;
+  // 每批的回流记账键独立（每批各自"初次+2 次修复尝试"），actor 仍是同一个 A6 实例。
+  const pageBudgetKey = (page: number) => `${a6Name}·第${page + 1}批`;
+  function validateVerdictPage(vs: Verdict[], pageClaims: Claim[]): void {
     list(vs, "verdicts");
-    sameSet(vs.map(v => v.claim_id), toVerify.map(c => c.id), "送验结论与 verdict");
+    sameSet(vs.map(v => v.claim_id), pageClaims.map(c => c.id), "送验结论与 verdict");
     for (const v of vs) {
       soft(["confirmed", "refuted", "unverified"].includes(v.verdict) && nonempty(v.note), "verdict 状态或说明无效");
       soft(v.verdict === "unverified" || nonempty(v.own_evidence), "独立 verdict 缺少自己的证据");
     }
   }
-  const { verdicts } = await askGate<VerdictBundle>("交叉验证员·铁证如", feedback => actorFor("交叉验证员·铁证如").ask<VerdictBundle>([
-    `先读 ${ROLE}/a6-verifier.md。目标 ${JSON.stringify(target)}。`,
-    `送验结论共 ${toVerify.length} 条、分 ${claimPages} 批（每批 ≤${CLAIM_PAGE_SIZE} 条），原文已落盘 ${claimsFile}。逐批领取并复查：python3 ${helperPath} claims-page --json '{"within_root":${JSON.stringify(board)},"claims_file":${JSON.stringify(claimsFile)},"page":N,"page_size":${CLAIM_PAGE_SIZE}}'（page 取 0 到 ${claimPages - 1}）；禁止跳批、禁止限取前 N 条，全部 ${claimPages} 批处理完才可返回，不抽样不降级。`,
-    `送验 ID 清单（每个 ID 恰好一个 verdict）：${JSON.stringify(toVerify.map(c => c.id))}。`,
-    `写 ${board}/verification/verdicts.json，返回 {verdicts:[{claim_id,verdict,note,own_evidence}]}。`,
-    "独立读取与复查，不接收原完整论证。confirmed/refuted 均须自己的非空证据；无法复查用 unverified 并说明原因，不能当作 refuted。",
-    feedback ? `你上一次返回未通过闸门，逐条修复后重新返回完整 verdicts：\n- ${feedback.split("\n").join("\n- ")}` : "",
-  ].filter(Boolean).join("\n")), v => validateVerdicts(v.verdicts));
+  const verdicts: Verdict[] = [];
+  let pendingReview = 0; // 分页上限截断后未复核的送验条数（预算暂停语义，如实进 not_covered）
+  for (let page = 0; page < pagesToRun; page++) {
+    const pageRun = await world.run("python3", [helperPath, "claims-page", "--json", JSON.stringify({ within_root: board, claims_file: claimsFile, page, page_size: CLAIM_PAGE_SIZE })]);
+    requireThat(pageRun.exitCode === 0, `送验结论第 ${page + 1} 批领取失败（exit ${pageRun.exitCode}）：${diag(pageRun)}`);
+    const pageReceipt = JSON.parse(pageRun.stdout);
+    requireThat(pageReceipt?.ok === true && Array.isArray(pageReceipt.claims) && pageReceipt.claims.length > 0, `送验结论第 ${page + 1} 批领取回执无效`);
+    const pageClaims: Claim[] = pageReceipt.claims;
+    const finalPage = page === pagesToRun - 1;
+    const bundle = await askGate<VerdictBundle>(pageBudgetKey(page), feedback => actorFor(a6Name).ask<VerdictBundle>([
+      `先读 ${ROLE}/a6-verifier.md。目标 ${JSON.stringify(target)}。`,
+      `送验结论共 ${toVerify.length} 条、分 ${claimPages} 批（每批 ≤${CLAIM_PAGE_SIZE} 条），原文已落盘 ${claimsFile}，由本工作流逐批领取并派发给你（同一实例逐批复核，禁止跳批、不抽样不降级）。`,
+      `本批为第 ${page + 1}/${claimPages} 批，此前已复核 ${page} 批。本批送验结论原文如下：`,
+      JSON.stringify(pageClaims),
+      finalPage ? `本批是本个工作流要派发的最后一批：把全部已复核批次的 verdicts 汇总写 ${board}/verification/verdicts.json（每个已复核送验 ID 恰好一条，含此前各批）。` : "",
+      `只返回本批结果 {verdicts:[{claim_id,verdict,note,own_evidence}]}，claim_id 仅限本批 ${pageClaims.length} 个。`,
+      "独立读取与复查，不接收原完整论证。confirmed/refuted 均须自己的非空证据；无法复查用 unverified 并说明原因，不能当作 refuted。",
+      feedback ? `你上一批返回未通过闸门，逐条修复后重新返回完整本批 verdicts：\n- ${feedback.split("\n").join("\n- ")}` : "",
+    ].filter(Boolean).join("\n")), v => validateVerdictPage(v.verdicts, pageClaims));
+    verdicts.push(...bundle.verdicts);
+  }
+  if (pageCapHit) {
+    // 预算暂停语义：未复核的送验结论如实记 unverified（不假装完成），缺口写入 not_covered。
+    const reviewedIds = new Set(verdicts.map(v => v.claim_id));
+    const pending = toVerify.filter(c => !reviewedIds.has(c.id));
+    for (const c of pending) verdicts.push({ claim_id: c.id, verdict: "unverified", note: "A6 分页超上限，未复核", own_evidence: "" });
+    pendingReview = pending.length;
+    gateChecks.push(`G4 分页上限：送验共 ${claimPages} 批，超过上限 ${MAX_CLAIM_PAGES} 批，已复核 ${pagesToRun} 批；剩余 ${pending.length} 条未复核（记 unverified）`);
+  }
+  // 合并闸门：全部批（含上限截断补记的 unverified）去重后与送验全集 sameSet 闭合。
+  unique(verdicts.map(v => v.claim_id), "verdict 全集");
+  sameSet(verdicts.map(v => v.claim_id), toVerify.map(c => c.id), "送验结论与 verdict");
   const confirmed = verdicts.filter(v => v.verdict === "confirmed").length;
   const refuted = verdicts.filter(v => v.verdict === "refuted").length;
   const unverified = verdicts.filter(v => v.verdict === "unverified").length;
-  gateChecks.push(`G4：${toVerify.length} 条送验结论全部有状态；${confirmed} confirmed / ${refuted} refuted / ${unverified} unverified`);
+  gateChecks.push(`G4：${toVerify.length} 条送验结论全部有状态（逐批复核 ${pagesToRun}/${claimPages} 批）；${confirmed} confirmed / ${refuted} refuted / ${unverified} unverified`);
   const verdictById = new Map(verdicts.map(v => [v.claim_id, v.verdict]));
   salvageFindings = findings.map(f => ({ ...f, status: verdictById.get(`finding:${f.id}`) === "confirmed" ? "verified" : verdictById.get(`finding:${f.id}`) === "refuted" ? "refuted" : "unverified" }));
   salvageClaims = verdicts.map(v => ({ claim_id: v.claim_id, verdict: v.verdict }));
   salvageCoverage = { files: map.source_files.length, files_analyzed: moduleResults.reduce((n, r) => n + r.coverage.files_analyzed, 0), chunks: map.chunks.length, verdicts: verdicts.length, confirmed, refuted, unverified };
+  // C11 覆盖账接入点：此处把 independent_review 维度（分母=toVerify.length，已复核=
+  // verdicts.length-pendingN，缺口=分页上限/未复核清单）写入 packages/agents_kernel/
+  // services/coverage.py 的 CoverageLedger——DWF 内经 world.run 调 python3 helper 落盘
+  // coverage_account.json，或由协调者直接构造该 schema JSON；index_files/semantics_deep
+  // 两维度分别在 G1（source_files 分母）与 G2（analyzed_files 汇总）接入。当前最小实现
+  // 为纯 Python 类 + 单测（tests/test_coverage.py），黑板以 coverage 摘要字段承载。
   stage = "G4 制品落盘核验";
   await ensureArtifacts(board, helperPath, [
     { path: `${board}/verification/verdicts.json`, owner: "交叉验证员·铁证如" },
@@ -458,14 +499,28 @@ try {
   stage = "G5 报告制品";
   phase("G5 报告制品");
   const coverage = salvageCoverage!; // G4 完成后必已赋值；未到 G4 就失败不会进入本阶段
-  const notCovered = [
+  const baselineCaveats = [
     "未运行真实构建/测试；静态分析不等于软件验收或开发完成",
     "源文件枚举与落盘内容依赖宿主工具和代理报告；当前运行时仅机械检查返回结构及引用闭合",
     "低/中严重度发现未逐条独立复查",
+  ];
+  const notCovered = [
+    ...baselineCaveats,
+    ...(pendingReview > 0 ? [`A6 分页超上限，剩余 ${pendingReview} 条未复核（记 unverified；verdicts.json 仅含已复核批次）`] : []),
     ...map.excluded.map(e => `排除 ${e.path}：${e.reason}`),
     ...specialties.flatMap(s => s.not_covered),
     ...verdicts.filter(v => v.verdict === "unverified").map(v => `${v.claim_id} 未验证：${v.note}`),
   ];
+  // Z08/A7 减负：不把全量 verdicts/notCovered 原文 stringify 进 prompt——给汇总统计与
+  // 逐 ID 状态紧凑清单，明细（note/own_evidence、排除原因、专项缺口）让 A7 按需读黑板；
+  // verdicts.json/manifest.json/specialty md 均已经 ensureArtifacts 核验真实存在（Z11）。
+  const verdictSummary = `confirmed ${confirmed} / refuted ${refuted} / unverified ${unverified}；逐条状态：${verdicts.map(v => `${v.claim_id}=${v.verdict}`).join(",")}`;
+  const notCoveredSummary = {
+    baseline: baselineCaveats,
+    excluded: { count: map.excluded.length, details_in: `${board}/manifest.json` },
+    specialty: specialtySpecs.map(([, , kind], i) => ({ kind, count: specialties[i].not_covered.length, details_in: `${board}/specialty/${kind}.md` })),
+    unverified: { count: unverified, details_in: `${board}/verification/verdicts.json` },
+  };
   // Z11：A7 只允许引用以上经 helper 核验真实存在的制品清单，未列入的文件不得作为报告素材。
   const verifiedArtifacts = {
     manifest: `${board}/manifest.json`,
@@ -481,8 +536,9 @@ try {
   const reportFile = await askGate<ReportFile>("报告撰写员·文汇章", feedback => actorFor("报告撰写员·文汇章").ask<ReportFile>([
     `先读 ${ROLE}/a7-reporter.md，只组织已有结论。黑板 ${board}；仓库 ${repoName}；中文报告写 ${reportPath}。`,
     `只允许引用以下经确定性核验真实存在的黑板制品（清单之外的文件不得作为报告素材）：${JSON.stringify(verifiedArtifacts)}。`,
-    `覆盖 ${JSON.stringify(coverage)}；verdicts ${JSON.stringify(verdicts)}；未覆盖 ${JSON.stringify(notCovered)}。`,
-    `报告必须保留 refuted 与 unverified，不写成全部已验证。返回 path、summary、sections（0~8）和 claim_ids（本次送验全部 ID）：${JSON.stringify(toVerify.map(c => c.id))}。`,
+    `覆盖 ${JSON.stringify(coverage)}；verdicts 汇总：${verdictSummary}。note/own_evidence 明细按需读 ${verifiedArtifacts.verdicts}。`,
+    `未覆盖摘要 ${JSON.stringify(notCoveredSummary)}；excluded 逐条原因读 ${verifiedArtifacts.manifest}，专项缺口读对应 specialty md，unverified 复查原因读 verdicts.json，报告第 8 章据此如实展开，不留白。`,
+    `报告必须保留 refuted 与 unverified，不写成全部已验证。返回 path、summary、sections（0~8）和 claim_ids（本次送验全部 ID，即 verdicts 汇总逐条状态中的全部 ID）。`,
     feedback ? `你上一次返回未通过闸门，逐条修复后重新返回：\n- ${feedback.split("\n").join("\n- ")}` : "",
   ].filter(Boolean).join("\n")), rf => {
     soft(nonempty(rf?.summary), "报告摘要为空");
