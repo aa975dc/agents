@@ -21,10 +21,14 @@
   需重建；已失效版本不再接受回归记录或完成标记。
 
 P2-02 桥：to_event_payload/from_event 纯函数（事件只放类型化小 JSON：版本号、
-manifest 哈希与状态，storage/events 约定）。本模块不写库，append_event/视图折叠
-的持久化接线归后续 CLI 任务。
+manifest 哈希与状态，storage/events 约定）。跨进程持久化（R03）：检查点落盘走
+JSON 检查点（save_checkpoint/from_checkpoint，atomicio 原子写）+ ResumeLedger 登记
+（kind=integration，由调用方组合）——事件库镜像（integration_version 事件入
+storage/events）需要 domain.views 注册新事件类型的折叠规则，views 不在本轮
+改动范围，取舍为仅 JSON 检查点；事件桥保持纯函数现状。
 """
 from agents_kernel import digest
+from agents_kernel.atomicio import read_json, write_json
 from agents_kernel.domain.review_record import attempt_id
 from agents_kernel.validation import CompanionError, strings, text
 
@@ -34,12 +38,26 @@ EVENT_INTEGRATION_VERSION = "integration_version"
 VERSION_STATUSES = ("candidate", "completed", "superseded")
 EVIDENCE_STATUSES = ("current", "stale", "unknown")
 
+# R03 检查点（JSON 原子写；跨进程经 ResumeLedger 登记 kind=integration 定位）。
+CHECKPOINT_VERSION = 1
+CHECKPOINT_KIND = "integration_board"
+
 
 def _require_sha256(value):
     if not isinstance(value, str) or len(value) != 64 \
             or any(ch not in "0123456789abcdef" for ch in value):
         raise CompanionError("清单 sha256 必须是 64 位小写十六进制：%r" % (value,))
     return value
+
+
+def _attempt_no_of(value):
+    """attempt 引用（"任务编号#第几次"）→ 序号；畸形引用明确报错，不猜。"""
+    if not isinstance(value, str) or "#" not in value:
+        raise CompanionError("attempt 引用非法：%r" % (value,))
+    tail = value.rsplit("#", 1)[1]
+    if not tail.isdigit() or int(tail) < 1:
+        raise CompanionError("attempt 引用非法：%r" % (value,))
+    return int(tail)
 
 
 class IntegrationCandidate:
@@ -115,8 +133,28 @@ class IntegrationBoard:
                             "attempt_id": attempt_id(tid, attempts[-1]["attempt_no"]),
                             "subject_sha256": sha, "approval": approval})
         candidate = IntegrationCandidate(candidate_id, entries)
+        previous = self._candidates.get(candidate.candidate_id)
+        if previous is not None:
+            self._reject_late_reports(candidate, previous)
         self._candidates[candidate.candidate_id] = candidate
         return candidate.to_dict()
+
+    @staticmethod
+    def _reject_late_reports(candidate, previous):
+        """迟到回报围栏（R03）：同 candidate_id 再入列时，某任务回报的 attempt 序号
+        严格旧于已固定候选 → 拒绝（旧 attempt 产出不能覆盖新候选）。同序号重提新
+        固定版本是既有重建语义，放行（由审查门/失效语义把关）。"""
+        recorded = {task["task_id"]: task for task in previous.tasks}
+        for task in candidate.tasks:
+            old = recorded.get(task["task_id"])
+            if old is None:
+                continue
+            old_no, new_no = _attempt_no_of(old["attempt_id"]), _attempt_no_of(task["attempt_id"])
+            if new_no < old_no:
+                raise CompanionError(
+                    "迟到回报被拒：任务 %s 回报 attempt #%d，候选 %s 已固定更新的 attempt #%d；"
+                    "旧 attempt 产出不能覆盖新候选"
+                    % (task["task_id"], new_no, candidate.candidate_id, old_no))
 
     @staticmethod
     def _verdict_reason(verdict):
@@ -294,6 +332,101 @@ class IntegrationBoard:
                 or not 1 <= integration_version <= len(self._versions):
             raise CompanionError("integration 版本不存在：%r" % (integration_version,))
         return self._versions[integration_version - 1]
+
+    # ---- 检查点（R03：跨进程持久化，JSON 原子写；不另造第二套状态机） ----
+
+    def checkpoint(self):
+        """内存台账 → 可序列化检查点（深副本）：候选集 + 版本清单（回归/superseded 随附）。"""
+        return {"kind": CHECKPOINT_KIND, "schema_version": CHECKPOINT_VERSION,
+                "candidates": [candidate.canonical()
+                               for _, candidate in sorted(self._candidates.items())],
+                "versions": [_checkpoint_manifest(manifest) for manifest in self._versions]}
+
+    def save_checkpoint(self, path):
+        """检查点原子落盘，返回内容摘要（作 ResumeLedger 的 source_anchor）。"""
+        state = self.checkpoint()
+        write_json(path, state)
+        return digest.digest(state)
+
+    @classmethod
+    def from_checkpoint(cls, board, review_board, path):
+        """从检查点还原（新进程只读持久记录）；形状/内容哈希不符明确报错，不猜。"""
+        state = read_json(path)
+        if not isinstance(state, dict) or state.get("kind") != CHECKPOINT_KIND \
+                or state.get("schema_version") != CHECKPOINT_VERSION \
+                or not isinstance(state.get("candidates"), list) \
+                or not isinstance(state.get("versions"), list):
+            raise CompanionError("integration 检查点形状或版本不符：%s" % path)
+        restored = cls(board, review_board)
+        for entry in state["candidates"]:
+            candidate = _restore_candidate(entry)
+            restored._candidates[candidate.candidate_id] = candidate
+        for raw in state["versions"]:
+            manifest = _restore_manifest(raw, len(restored._versions) + 1, path)
+            restored._versions.append(manifest)
+            restored._by_content[manifest["manifest_sha256"]] = manifest["integration_version"]
+        return restored
+
+
+def _checkpoint_manifest(manifest):
+    copied = dict(manifest)
+    copied["candidates"] = [{"candidate_id": candidate["candidate_id"],
+                             "tasks": [dict(task) for task in candidate["tasks"]]}
+                            for candidate in manifest["candidates"]]
+    regression = manifest["regression"]
+    copied["regression"] = {
+        "feature_level": [dict(record) for record in regression["feature_level"]],
+        "version_level": dict(regression["version_level"]) if regression["version_level"] else None}
+    return copied
+
+
+def _restore_candidate(entry):
+    if not isinstance(entry, dict) or not isinstance(entry.get("tasks"), list) \
+            or not entry["tasks"]:
+        raise CompanionError("integration 检查点候选条目损坏：%r" % (entry,))
+    tasks = []
+    for task in entry["tasks"]:
+        if not isinstance(task, dict) or not isinstance(task.get("task_id"), str) \
+                or "approval" not in task:
+            raise CompanionError("integration 检查点任务条目损坏：%r" % (task,))
+        _attempt_no_of(task.get("attempt_id"))
+        _require_sha256(task.get("subject_sha256"))
+        tasks.append(dict(task))
+    return IntegrationCandidate(text(entry.get("candidate_id"), "候选编号"), tasks)
+
+
+def _restore_manifest(raw, expected_version, path):
+    if not isinstance(raw, dict) or raw.get("integration_version") != expected_version \
+            or not isinstance(raw.get("candidates"), list) \
+            or not isinstance(raw.get("regression"), dict):
+        raise CompanionError("integration 检查点版本条目损坏（期望版本号 %d）：%s"
+                             % (expected_version, path))
+    status = text(raw.get("status"), "integration 状态")
+    if status not in VERSION_STATUSES:
+        raise CompanionError("integration 检查点状态无法识别：%s" % status)
+    content = [{"candidate_id": candidate["candidate_id"],
+                "tasks": [dict(task) for task in candidate["tasks"]]}
+               for candidate in raw["candidates"]]
+    content_sha = digest.digest(content)
+    if content_sha != raw.get("manifest_sha256"):
+        raise CompanionError(
+            "integration 检查点内容哈希不符（manifest_sha256=%s，重算=%s）：%s"
+            % (raw.get("manifest_sha256"), content_sha, path))
+    regression = raw["regression"]
+    feature_level = regression.get("feature_level")
+    version_level = regression.get("version_level")
+    if not isinstance(feature_level, list) or \
+            (version_level is not None and
+             (not isinstance(version_level, dict) or
+              version_level.get("status") not in ("passed", "failed"))):
+        raise CompanionError("integration 检查点回归记录损坏：%s" % path)
+    manifest = {"integration_version": expected_version, "manifest_sha256": content_sha,
+                "candidates": content, "status": status,
+                "regression": {"feature_level": [dict(record) for record in feature_level],
+                               "version_level": dict(version_level) if version_level else None}}
+    if raw.get("superseded_reason") is not None:
+        manifest["superseded_reason"] = text(raw.get("superseded_reason"), "失效原因")
+    return manifest
 
 
 def to_event_payload(manifest):

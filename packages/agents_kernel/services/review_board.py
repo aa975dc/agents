@@ -15,13 +15,32 @@
 - require_approval(task_id)：TaskBoard 的 done 门回调——feature policy 开启时，
   impl/review 任务 done 前必须有有效批准，否则拒绝。policy 缺省关闭（向后兼容，
   旧项目不受影响）。
+
+R03 跨进程持久化：submit/approval 记录本为内存态；现补检查点落盘点
+（save_checkpoint/from_checkpoint，atomicio 原子写）。请求与结论都绑定
+subject_sha256，落盘重读时逐条形状校验 + 结论经 ReviewRecord.coerce 复验，
+损坏明确报错。与 IntegrationBoard 检查点配套，经 ResumeLedger（kind=integration）
+登记定位。
 """
+from agents_kernel import digest
+from agents_kernel.atomicio import read_json, write_json
 from agents_kernel.contracts import schemas
 from agents_kernel.domain.review_record import ReviewRecord, attempt_id
 from agents_kernel.validation import CompanionError, text
 
 # 固定版本由登记表背书的 subject 类型；attempt 类由请求时 pin 的 sha256 背书。
 _REGISTRY_SUBJECTS = ("handoff", "contract")
+
+# R03 检查点。
+CHECKPOINT_VERSION = 1
+CHECKPOINT_KIND = "review_board"
+
+
+def _check_sha256(value):
+    if not isinstance(value, str) or len(value) != 64 \
+            or any(ch not in "0123456789abcdef" for ch in value):
+        raise CompanionError("subject_sha256 必须是 64 位小写十六进制：%r" % (value,))
+    return value
 
 
 class ReviewBoard:
@@ -130,3 +149,39 @@ class ReviewBoard:
             if request["subject_ref"] == subject_ref:
                 return request
         return None
+
+    # ---- 检查点（R03：跨进程持久化 submit/approval 记录） ----
+
+    def checkpoint(self):
+        """内存记录 → 可序列化检查点（深副本）：审查请求 + 结论（均绑固定 sha256）。"""
+        return {"kind": CHECKPOINT_KIND, "schema_version": CHECKPOINT_VERSION,
+                "requests": [dict(request) for request in self._requests],
+                "records": [dict(record) for record in self._records]}
+
+    def save_checkpoint(self, path):
+        """检查点原子落盘，返回内容摘要（与 integration 检查点摘要并列登记）。"""
+        state = self.checkpoint()
+        write_json(path, state)
+        return digest.digest(state)
+
+    @classmethod
+    def from_checkpoint(cls, board, registry, path):
+        """从检查点还原；结论逐条经 ReviewRecord.coerce 复验，请求形状收紧校验。"""
+        state = read_json(path)
+        if not isinstance(state, dict) or state.get("kind") != CHECKPOINT_KIND \
+                or state.get("schema_version") != CHECKPOINT_VERSION \
+                or not isinstance(state.get("requests"), list) \
+                or not isinstance(state.get("records"), list):
+            raise CompanionError("审查台检查点形状或版本不符：%s" % path)
+        restored = cls(board, registry)
+        for raw in state["requests"]:
+            if not isinstance(raw, dict) or not isinstance(raw.get("task_id"), str) \
+                    or raw.get("subject_type") not in schemas.RECORD_SUBJECT_TYPES \
+                    or not isinstance(raw.get("subject_ref"), str) \
+                    or not isinstance(raw.get("implementer_attempt_id"), str):
+                raise CompanionError("审查台检查点请求条目损坏：%r" % (raw,))
+            _check_sha256(raw.get("subject_sha256"))
+            restored._requests.append(dict(raw))
+        for raw in state["records"]:
+            restored._records.append(ReviewRecord.coerce(raw).to_dict())
+        return restored

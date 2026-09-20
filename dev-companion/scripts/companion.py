@@ -72,6 +72,22 @@ def parser():
         child.add_argument("--archive", required=True)
         if name == "restore":
             child.add_argument("--token", required=True)
+    # R02：team 模式事实库入口（SQLite 事件库）；legacy 命令完全不感知 team.db。
+    child = sub.add_parser("team-init")
+    child.add_argument("--feature", required=True)
+    child.add_argument("title")
+    child = sub.add_parser("team-status")
+    child.add_argument("--offset", type=int, default=0)
+    child.add_argument("--limit", type=int, default=50)
+    child = sub.add_parser("team-task")
+    child.add_argument("--set", required=True, dest="task_id")
+    child.add_argument("--feature", required=True)
+    child.add_argument("--status", required=True)
+    child.add_argument("--expect-seq", type=int, dest="expect_seq")
+    child = sub.add_parser("team-migrate")
+    child.add_argument("--from-json", action="store_true", dest="from_json",
+                       help="从本项目旧三 JSON（state/journey/release）只读导入")
+    child.add_argument("--dry-run", action="store_true")
     return root
 
 
@@ -144,6 +160,18 @@ def run(args):
             return {"output": str(path), "revision": view["revision"]}
         print(output)
         return None
+    if name.startswith("team-"):
+        from agents_kernel.storage import team
+        if name == "team-init":
+            return team.init_feature(args.project, args.feature, args.title)
+        if name == "team-status":
+            return team.read_status(args.project, offset=args.offset, limit=args.limit)
+        if name == "team-task":
+            return team.set_task_status(args.project, args.task_id, args.feature,
+                                        args.status, expect_seq=args.expect_seq)
+        if not args.from_json:
+            raise CompanionError("team-migrate 需要 --from-json 指定从旧三 JSON 导入")
+        return team.migrate_from_json(args.project, dry_run=args.dry_run)
     from archives import ArchiveStore
     store = ArchiveStore(project.root)
     if name == "history":
