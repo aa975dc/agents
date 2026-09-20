@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务清单</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; background: #fff; }
+  .row { display: flex; gap: .5rem; margin: 1rem 0; }
+  input[type=text] { flex: 1; padding: .4rem; }
+  button { padding: .4rem .8rem; }
+  ul { padding: 0; list-style: none; }
+  li { display: flex; align-items: center; gap: .5rem; padding: .35rem 0; border-bottom: 1px solid #ddd; }
+  li.done span { text-decoration: line-through; color: #777; }
+  .error { color: #b00020; min-height: 1.2em; }
+  .empty { color: #777; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111; color: #eee; }
+    li { border-bottom-color: #444; }
+    li.done span { color: #999; }
+  }
+</style>
+</head>
+<body>
+<h1>任务清单</h1>
+<form id="add-form" class="row">
+  <input id="title" type="text" placeholder="新任务标题" required>
+  <button type="submit">添加</button>
+</form>
+<p id="error" class="error" role="alert"></p>
+<ul id="tasks"></ul>
+<p id="empty" class="empty">还没有任务，添加第一条试试。</p>
+<script src="/app.js"></script>
+</body>
+</html>

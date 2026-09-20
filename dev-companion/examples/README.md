@@ -37,3 +37,21 @@ python3 dev-companion/examples/demo-project/ledger.py
 输出包含项目路径、状态板和网页启动命令；`.dev-companion/demo-evidence/` 保留每步退出码和原始输出。结果为 `local_verified`、`human_trial=false`。可传 `--project` 指定不存在或空目录，已有非空目录会被拒绝。
 
 下方保留原有小型模块演示，用于验证旧版需求、快照和恢复流程。
+
+## 团队端到端示例：任务清单应用（team-e2e-app/）
+
+需求（prototype.md：五态矩阵设计 brief）+ 接口契约（api_contract.json，过
+`contracts.schemas.validate_api_contract` 校验）+ 按实现者分工的示例代码：
+`app/store.py`、`app/api.py` 归后端实现（impl-backend）可写，`web/index.html`、
+`web/app.js` 归前端实现（impl-frontend）可写，两侧 ownership 不相交。
+
+`tests/team_e2e/test_team_e2e.py` 以它为被构建对象走完整团队链路：任务 DAG
+（design → 两路并行 impl → review → integration）、各自真实 git worktree 隔离
+与租约、自审拒绝+独立批准、集成版本两级回归，最后真实子进程调用契约入口并在
+临时端口起 HTTP 验证。仓库根运行 `python3 -m unittest tests.team_e2e.test_team_e2e -v`。
+
+人工试用示例应用（在示例目录内）：
+
+```sh
+python3 -m app.api --port 8791   # 浏览器打开 http://127.0.0.1:8791
+```
