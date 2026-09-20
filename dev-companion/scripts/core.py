@@ -27,6 +27,9 @@ from agents_kernel.validation import (CompanionError, relative_path, safe_file, 
 from archives import ArchiveError, pending_restore
 
 
+CAPACITY_LIMIT_MESSAGE = "项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）"
+
+
 class CapacityExceeded(CompanionError):
     """项目超出当前扫描容量上限（Z21 前半）：状态可降级展示，写路径仍硬拒绝。"""
 
@@ -174,17 +177,51 @@ class Project:
     def snapshot(self):
         # Z13：请求作用域内同项目只扫一次；作用域外（packet/check/accept 等写路径）每次现算，
         # check 的前后快照对比不受缓存影响。
-        return RequestCache.get(("project-snapshot", str(self.root)), self._scan_snapshot)
+        return RequestCache.get(("project-snapshot", str(self.root)), self._snapshot_guarded)
 
-    def _scan_snapshot(self):
-        files, excluded, total = {}, [], 0
+    def _capacity_verdict_path(self):
+        return self.data / "capacity-verdict.json"
+
+    def _snapshot_guarded(self):
+        """ST06/SC05（收尾 R05）：普通查询不读源码内容、不 walk 源码树——容量判定在
+        confirm 时已普查并缓存（stat-only，零文件读取）；无判定的旧项目在此做一次
+        stat-only 普查（零内容读取）补齐。删除 capacity-verdict.json 可强制重测
+        （fail-safe：缓存只会拒绝、不会把超限项目放行为可验收）。"""
+        verdict = self._ensure_capacity_verdict()
+        if verdict.get("oversize"):
+            raise CapacityExceeded(CAPACITY_LIMIT_MESSAGE)
+        return self._scan_snapshot()
+
+    def _ensure_capacity_verdict(self):
+        verdict_path = self._capacity_verdict_path()
+        verdict = read_json(verdict_path) if verdict_path.is_file() else None
+        if verdict is not None:
+            return verdict
+        count = total = 0
+        oversize = False
+        for entry in self._walk_included():
+            if entry[0] != "file":
+                continue
+            count += 1
+            total += entry[3].st_size
+            if entry[3].st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or count >= 10000:
+                oversize = True
+                break
+        verdict = {"schema_version": 1, "oversize": oversize, "files": count,
+                   "bytes": total, "measured_at": now()}
+        write_json(verdict_path, verdict)
+        return verdict
+
+    def _walk_included(self):
+        """产出 ("excluded", 原因) 或 ("file", relative, path, stat_result)。
+        过滤条件是容量普查与快照哈希的唯一来源（防两处走样）。"""
         for directory, dirs, names in os.walk(self.root, followlinks=False):
             parent = Path(directory)
             kept = []
             for name in sorted(dirs):
                 path = parent / name
                 if name in EXCLUDED_DIRS or sensitive(name) or path.is_symlink():
-                    excluded.append(path.relative_to(self.root).as_posix() + "/")
+                    yield "excluded", path.relative_to(self.root).as_posix() + "/"
                 else:
                     kept.append(name)
             dirs[:] = kept
@@ -192,20 +229,32 @@ class Project:
                 path = parent / name
                 relative = path.relative_to(self.root).as_posix()
                 if name == ".DS_Store" or name.endswith(".pyc") or sensitive(name) or path.is_symlink():
-                    excluded.append(relative)
+                    yield "excluded", relative
                     continue
                 if not path.is_file():
-                    excluded.append(relative + "（特殊文件，未纳入项目检查）")
+                    yield "excluded", relative + "（特殊文件，未纳入项目检查）"
                     continue
-                info = path.stat()
-                total += info.st_size
-                if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
-                    raise CapacityExceeded("项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）")
-                sha256_hex, size = sha256_file(path)
-                after = path.stat()
-                if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or size != info.st_size:
-                    raise CompanionError("项目文件正在变化，请等待写入结束后刷新")
-                files[relative] = content_digest(sha256_hex, stat.S_IMODE(info.st_mode))
+                yield "file", relative, path, path.stat()
+
+    def _scan_snapshot(self):
+        files, excluded, total = {}, [], 0
+        for entry in self._walk_included():
+            if entry[0] == "excluded":
+                excluded.append(entry[1])
+                continue
+            _, relative, path, info = entry
+            total += info.st_size
+            if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
+                # 项目在"未超限判定"之后长到超限：回写判定，让下一次 status 零读取降级
+                write_json(self._capacity_verdict_path(),
+                           {"schema_version": 1, "oversize": True, "files": len(files) + 1,
+                            "bytes": total, "measured_at": now()})
+                raise CapacityExceeded(CAPACITY_LIMIT_MESSAGE)
+            sha256_hex, size = sha256_file(path)
+            after = path.stat()
+            if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or size != info.st_size:
+                raise CompanionError("项目文件正在变化，请等待写入结束后刷新")
+            files[relative] = content_digest(sha256_hex, stat.S_IMODE(info.st_mode))
         return {"files": files, "fingerprint": digest(files), "excluded": sorted(excluded)}
 
     def init(self, scope):
@@ -230,6 +279,12 @@ class Project:
             self.require_plan(state)
             state["confirmed"] = True
             self.commit(state, {"kind": "scope_confirmed", "scope_version": state["scope_version"]})
+            # 收尾 R05：项目确认即做一次 stat-only 容量普查并缓存，保证此后普通 status
+            # 对源码树零 walk、零内容读取（超限则 status 直接走判定降级）。
+            try:
+                self._ensure_capacity_verdict()
+            except CompanionError:
+                pass
             return {"revision": state["revision"], "scope_version": state["scope_version"], "confirmed": True}
 
     @staticmethod
@@ -581,7 +636,8 @@ class Project:
         view = self.decorate_status(view, planning, include_release=False)
         if not view.get("recovery"):
             view["next_step"] = ("项目文件超出当前检查上限（单文件20MiB，总量100MiB，10000文件）；"
-                                 "进度与验收核验已暂停，请先为项目建立文件索引或减小规模后重试")
+                                 "进度与验收核验已暂停，请先为项目建立文件索引或减小规模后重试；"
+                                 "若项目已缩小，删除 .dev-companion/capacity-verdict.json 可重新测量")
         return view
 
     def decorate_status(self, view, planning, include_release):

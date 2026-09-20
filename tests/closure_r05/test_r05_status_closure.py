@@ -78,7 +78,8 @@ class SnapshotPathReadsSourceTree(CliProjectCase):
         self.assertIsNone(view.get("capacity_status"), "低于阈值不得标 paused")
         self.assertGreater(counts["source_tree"]["open_calls"], 0, "快照路径必须读源码树（对照语义）")
         self.assertGreater(counts["source_tree"]["read_bytes"], 0)
-        self.assertEqual(counts["facts"]["open_calls"], 1, "事实库 state.json 读取另计")
+        # 2 次 = state.json + capacity-verdict.json（R05 修复新增的容量判定缓存，同属事实库合法读取）
+        self.assertEqual(counts["facts"]["open_calls"], 2, "事实库读取另计（state + 容量判定缓存）")
         self.assertEqual(view["counts"]["pending"], 1)
 
 

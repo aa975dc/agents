@@ -211,3 +211,28 @@ SQLite C 层内部读写不可见（§3 边界），以 connect 目标路径计 
 - 单测：`python3 -m unittest tests.closure_r05.test_r05_status_closure -v`（5 项，1.0s）
 - 被测 HEAD：00be5f23b340abf31be957161bcd2a82d44b8601；本任务产物：
   tests/closure_r05/（新增）、本记录（新增）。
+
+## 9. 修复后复测（2026-09-20 收尾轮；证据 r05-remeasure-2026-09-20.json）
+
+针对 §7.1 的 FAIL，core.py 已做最小修复（独立提交）：`snapshot()` 增加容量判定缓存
+守卫——confirm 时做一次 **stat-only** 容量普查（零文件打开/读取）写
+`.dev-companion/capacity-verdict.json`；此后普通 status 对源码树 **零 walk、零 open、
+零内容读取**；`_scan_snapshot` 中途发现超限（项目在"未超限判定"后增长）会回写判定，
+使该一次性代价被缓存；判定只用于拒绝（fail-safe），删除判定文件可强制重测。
+
+复测结果（同 fixture 口径，10/10 checks PASS）：
+
+| 项 | 修复前（§4/§5） | 修复后 |
+|---|---|---|
+| L status 插桩（open/scandir/walk/read_bytes） | 10 / 2 / 1 / 96,470,601 | **0 / 0 / 0 / 0** |
+| L status 温热 p50 / p95（n=30，含解释器启动） | 73.3ms / 89.4ms | **36.4ms / 42.4ms** |
+| 峰值 RSS | 19.8MiB | **15.8MiB** |
+| team-status p50 / p95 | 38.0 / 39.7ms | 37.9 / 42.0ms |
+| 小项目快照路径对照（读取应发生） | 发生 | 仍发生（阈值语义如实保留） |
+
+**修订结论**：经真实 CLI 入口、L 档项目，legacy 普通 status 与 team-status 的
+"零源码树 walk/hash 及内容读取"均记 **PASS**（stale/unknown 与严格 accept/release
+门语义不变，历史验收展示不冒充）。遗留边界如实列明：① 项目在判定后增长的场景，
+增长后首次 status 仍会有一次内容读取发现代价（随后被缓存，见 core.py 回写逻辑）；
+② 冷缓存、索引建成后 L 档 accept/release 端到端仍 NOT_RUN；③ 判定缓存属 fail-safe
+拒绝语义，"缩小后重测"需按提示删除判定文件（无自动失效探测）。
