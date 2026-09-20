@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T15:02:51+00:00",
+  "generated_at": "2026-09-20T16:00:29+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "48d9a1cb5c476a5977c768af2db7e9dc50f5fda8"
+    "commit": "526e3168feded7597cfa11f80331634f81bcc866"
   },
   "target": {
     "plugin": "dev-companion",
