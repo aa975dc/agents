@@ -11,8 +11,9 @@ PLUGIN_ROOT = REPO / "dev-companion"
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 
 EXISTING_ROLES = ("companion-developer", "companion-checker")
+NEW_ROLES = ("companion-product", "companion-design")
 NEW_ROLE = "companion-product"
-ALL_ROLES = EXISTING_ROLES + (NEW_ROLE,)
+ALL_ROLES = EXISTING_ROLES + NEW_ROLES
 
 REQUIRED_FRONTMATTER_KEYS = {"name", "description"}
 
@@ -30,6 +31,13 @@ ROLE_MARKERS = {
         "用户故事",
         "不再派发子智能体",
         "references/product-inputs.md",
+    ),
+    "companion-design": (
+        "状态矩阵",
+        "组件清单",
+        "不写实现代码",
+        "不再派发子智能体",
+        "references/design-handoff.md",
     ),
 }
 
