@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T09:01:38+00:00",
+  "generated_at": "2026-09-20T09:58:22+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "f100a1ec8a36bcd5b28a9438232573f6b816a252"
+    "commit": "594ca17d0ebb337598a47c704fcb58081dabf44f"
   },
   "target": {
     "plugin": "dev-companion",
@@ -51,19 +51,39 @@
       "bytes": 2832
     },
     {
+      "path": "agents_kernel/domain/tasks.py",
+      "sha256": "999269e20a117019b6f29b4e9e9c2c1e7652fee1e47ba7fb81ec578c42fa24cf",
+      "bytes": 11077
+    },
+    {
       "path": "agents_kernel/domain/views.py",
       "sha256": "e2100768351e7344040a8368ca9bd27981b269e729fead80b368b9de015b7224",
       "bytes": 8077
     },
     {
       "path": "agents_kernel/execution/__init__.py",
-      "sha256": "815dc3ee3aee5b7dff54bc7dafcc31251e9d89a7a149d69e41c2654b0cb74762",
-      "bytes": 83
+      "sha256": "6ddd61162977f35fb5874df9f7735ffe76059187af878ae02151344bff54b417",
+      "bytes": 335
+    },
+    {
+      "path": "agents_kernel/execution/backoff.py",
+      "sha256": "e495e05570bc1c1d2dd8bdc51fea427f51fe9100a1fd905b7ccdf1199ecac236",
+      "bytes": 6775
     },
     {
       "path": "agents_kernel/execution/budget.py",
       "sha256": "8770c028c9ce77ddb5c7d0f202d8bc1f5894454725c6b14be6087837229e8a3a",
       "bytes": 4624
+    },
+    {
+      "path": "agents_kernel/execution/idempotency.py",
+      "sha256": "b1d223c37be358762f03b934d82ab958a764ef73f743be9c92d09f8573199096",
+      "bytes": 4359
+    },
+    {
+      "path": "agents_kernel/execution/lease.py",
+      "sha256": "1cd1cb96d1b9a3efb8c7635e17773babb0cc5d828f93267ad1b3ef2340e15b53",
+      "bytes": 9296
     },
     {
       "path": "agents_kernel/filesystem/__init__.py",
@@ -104,6 +124,11 @@
       "path": "agents_kernel/indexing/scanner.py",
       "sha256": "bea283031f0911105268f01b7630d6b33ce6b878e38a439ae7b045dee34fd386",
       "bytes": 9607
+    },
+    {
+      "path": "agents_kernel/indexing/sharding.py",
+      "sha256": "fbf2c2dfb04d702c795ca1ba29f57fcb9f367614b6a583473ed8e576061d9e7d",
+      "bytes": 27011
     },
     {
       "path": "agents_kernel/indexing/slicing.py",
@@ -156,9 +181,14 @@
       "bytes": 2121
     },
     {
+      "path": "agents_kernel/services/scheduler.py",
+      "sha256": "25fc2c5e395161802112e81507ff8cb666c1f3061e835f648266b3a85703d824",
+      "bytes": 7374
+    },
+    {
       "path": "agents_kernel/storage/__init__.py",
-      "sha256": "48b567c9f0a801a01f0cb8bd5c6c6372f69a843176405bbf07338bb81775b0d0",
-      "bytes": 391
+      "sha256": "f395bd163c06aed5000a8d37705a24410a2f74f24108e731fe01662e8439dcde",
+      "bytes": 504
     },
     {
       "path": "agents_kernel/storage/db.py",
@@ -169,6 +199,11 @@
       "path": "agents_kernel/storage/events.py",
       "sha256": "43c28f37fe9c2d2a5933e2a4627ea03b4906c1034f0bf44ef38a6d55c7d33fb0",
       "bytes": 4683
+    },
+    {
+      "path": "agents_kernel/storage/events_idem.py",
+      "sha256": "6de6d1539036dc77636fdd3593e426d62bad0e0b687f25ef8c9b11727e35e4a5",
+      "bytes": 1613
     },
     {
       "path": "agents_kernel/storage/migration.py",
