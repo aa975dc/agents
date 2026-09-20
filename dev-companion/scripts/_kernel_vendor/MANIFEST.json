@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T06:38:37+00:00",
+  "generated_at": "2026-09-20T07:40:20+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "20f61ed4a1816f2ae44219fa1f7d8e4f5df2aeb7"
+    "commit": "8a59f4ad289d5c8e0cb7b9fa745f12a2bdc5a4f8"
   },
   "target": {
     "plugin": "dev-companion",
@@ -51,6 +51,21 @@
       "bytes": 386
     },
     {
+      "path": "agents_kernel/indexing/content_hash.py",
+      "sha256": "2e32b8beb78e200489861acf24824e80756893521db685adee409533711e6d32",
+      "bytes": 5150
+    },
+    {
+      "path": "agents_kernel/indexing/edges.py",
+      "sha256": "8441be3363a30b4113fc0416aaec5c21e52394f820e3759c0b070c51126d1b92",
+      "bytes": 9573
+    },
+    {
+      "path": "agents_kernel/indexing/modules.py",
+      "sha256": "c175d84aa6d4729d5ba1670372385b26fa13eba62bc09f9c55d3ba7d22ef008b",
+      "bytes": 4724
+    },
+    {
       "path": "agents_kernel/indexing/reader.py",
       "sha256": "b2ab9367ac7b5ba95856ee8153e7b311576c58488bc816d548eaeec067b62837",
       "bytes": 5508
@@ -84,6 +99,11 @@
       "path": "agents_kernel/services/__init__.py",
       "sha256": "c8b486353823f9639f99d6ac6f890a2d8abcfc8225b1549982286ea7922bf8f7",
       "bytes": 169
+    },
+    {
+      "path": "agents_kernel/services/closure.py",
+      "sha256": "98171013055d8dc4ef326d3389b821a88b610c0d1cbc41cc3ea2f69ac6d418f8",
+      "bytes": 3431
     },
     {
       "path": "agents_kernel/services/request_cache.py",
