@@ -17,6 +17,7 @@ team-* 命令经这里落到 SQLite 事实库（storage.db + domain.views 物化
 """
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 from agents_kernel.atomicio import write_json
@@ -50,7 +51,54 @@ def team_db_path(project_dir):
         raise CompanionError(
             "team 事实库不能是文件链接（指向 %s）；追随链接会把团队事实读写到项目边界之外"
             % os.readlink(path))
+    if path.exists() and not path.is_file():
+        # FIX-01：目录/fifo/设备等非普通文件在打开前拒绝（stat 检查，不 open——
+        # 打开 fifo 会阻塞，sqlite 对目录报错含糊）。
+        raise CompanionError("team 事实库不是普通文件，拒绝打开（目录/管道/设备等）：%s" % path)
     return path
+
+
+# 只读打开时必须齐全的表（schema 校验的最小集，与 db._SCHEMA_V1 对齐）。
+_REQUIRED_TABLES = ("store_meta", "events", "feature_view", "task_view",
+                    "evidence_view", "release_view")
+
+
+def _open_readonly(path):
+    """只读打开既有 team 事实库（FIX-01）：查询绝不初始化或迁移 schema。
+
+    库不存在 → 引导 team-init（不静默建空库）；损坏/未知 schema → 结构化报错；
+    全程 mode=ro/immutable 连接，不留 journal/WAL/锁文件。
+    """
+    if not path.exists():
+        raise CompanionError("team 事实库不存在：%s；请先运行 team-init" % path)
+    store = db.Store(path)
+    try:
+        try:
+            store.open_readonly()
+            version_row = store.query_one("SELECT MAX(version) AS version FROM schema_version")
+        except sqlite3.Error as exc:
+            raise CompanionError(
+                "team 事实库损坏或不是有效的 SQLite 库：%s（%s）" % (path, exc)) from exc
+        version = version_row["version"] if version_row is not None else None
+        if version is None:
+            raise CompanionError("team 事实库缺少 schema 版本记录（不是 team 库或已损坏）：%s" % path)
+        if version > db.SCHEMA_VERSION:
+            raise CompanionError(
+                "team 事实库 schema 版本 %s 高于当前工具支持的 %d，请升级工具后再读：%s"
+                % (version, db.SCHEMA_VERSION, path))
+        try:
+            missing = [name for name in _REQUIRED_TABLES if store.query_one(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (name,)) is None]
+        except sqlite3.Error as exc:
+            raise CompanionError("team 事实库损坏：%s（%s）" % (path, exc)) from exc
+        if missing:
+            raise CompanionError("team 事实库缺少表（%s），schema 不完整或已损坏：%s"
+                                 % (", ".join(missing), path))
+        return store
+    except BaseException:
+        store.close()
+        raise
 
 
 def _open_existing(path):
@@ -124,13 +172,17 @@ def set_task_status(project_dir, task_id, feature_id_value, status, *, expect_se
 
 
 def read_status(project_dir, *, offset=0, limit=50):
-    """team-status：物化视图分页只读（features/tasks 同一游标），含 generation 与事实源路径。"""
+    """team-status：物化视图分页只读（features/tasks 同一游标），含 generation 与事实源路径。
+
+    FIX-01：经只读连接打开——状态查询不建库、不迁移 schema、不写 journal/WAL；
+    损坏/未知 schema 结构化报错，而不是被打开路径顺手"修好"。
+    """
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise CompanionError("offset 必须是非负整数")
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= _MAX_LIMIT:
         raise CompanionError("limit 必须在 1..%d" % _MAX_LIMIT)
     path = team_db_path(project_dir)
-    store = _open_existing(path)
+    store = _open_readonly(path)
     try:
         return {"store": str(path), "generation": events.view_head(store),
                 "offset": offset, "limit": limit,
@@ -180,16 +232,28 @@ def _dump_events(store, out_path):
 
 
 def _export_facts(project_dir, db_path, store, manifest, total, out_dir):
-    """回退前导出全量事实：旧 schema 草稿（复用 migration.fallback_export，可再次
-    team-migrate 读入）+ team_events.json 全量事件日志（迁移后新写入只在这里完整
-    保真——team-init 功能在库中本无 scope/allowed_paths 事实，草稿不伪造）。
-    校验回读条数与库内总数一致后才返回，短写即拒绝回退。"""
+    """回退前导出全量事实（FIX-03）：旧 schema 草稿 + 不可映射事实 sidecar + 导出
+    manifest（migration.fallback_export，含迁移后新增事实的全量折叠），另附
+    team_events.json 全量事件日志（append-only 事实的完整保真记录）。逐项校验：
+    草稿/sidecar/manifest 事件计数与库内总数一致、manifest 读回核对 head，任何
+    短写即拒绝回退，team.db 保留。"""
     out_dir = Path(out_dir)
     if inside(realpath(out_dir), realpath(db_path.parent)):
         raise CompanionError("导出目录不得在项目记录目录内（避免覆盖 legacy 原件）：" + str(out_dir))
     exported = {"out_dir": str(out_dir), "drafts": {}, "events_log": str(out_dir / "team_events.json")}
     if manifest is not None:
-        exported["drafts"] = migration.fallback_export(project_dir, out_dir, db_path=db_path)["files"]
+        report = migration.fallback_export(project_dir, out_dir, db_path=db_path)
+        exported["drafts"] = report["files"]
+        exported["sidecar"] = report.get("sidecar")
+        exported["warnings"] = report["warnings"]
+        exported["counts"] = report["counts"]
+        # manifest 完整性核对：读回落盘的 export_manifest.json，计数与 head 必须与库内一致
+        written_manifest = json.loads(
+            Path(report["manifest"]).read_text(encoding="utf-8"))
+        if (written_manifest.get("counts", {}).get("events_total") != total or
+                written_manifest.get("head_seq") != events.view_head(store)):
+            raise CompanionError(
+                "导出 manifest 校验失败：manifest 记录与库内事实不一致；回退中止，team.db 保留")
     items = _dump_events(store, out_dir / "team_events.json")
     written = json.loads((out_dir / "team_events.json").read_text(encoding="utf-8"))["events"]
     if len(written) != total or len(items) != total:
@@ -227,8 +291,9 @@ def rollback_store(project_dir, *, export_first=None):
     lock = Path(str(path) + ".writer")
     if lock.exists():
         raise CompanionError("存在写者锁 %s；请确认无 team 命令在运行后再回退" % lock)
-    store = db.Store(path)
-    store.open()
+    # FIX-01：核对阶段只读打开——回退删除前不得对库做任何初始化/迁移写入
+    #（含"顺手建表"：若这其实是一个外部/无关库，删库前必须先验证它是有效 team 库）。
+    store = _open_readonly(path)
     try:
         manifest = migration.read_manifest(store)
         total, imported, activity = _store_event_counts(store)

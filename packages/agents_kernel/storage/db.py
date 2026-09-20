@@ -18,6 +18,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from agents_kernel.validation import CompanionError
 
@@ -227,6 +228,7 @@ class Store:
         self.path = Path(path)
         self._conn = None
         self._in_transaction = False
+        self._readonly = False
 
     def open(self):
         if self._conn is not None:
@@ -244,6 +246,31 @@ class Store:
             self._conn = None
             conn.close()
             raise
+
+    def open_readonly(self):
+        """只读打开既有库（FIX-01，SR-02 剩余加固）：mode=ro URI，SQLite 层面禁止写入。
+
+        不建目录、不建库、不迁移 schema、不产生/改写 journal/WAL；调用方须先做
+        普通文件类型检查（本方法对非普通文件再次拒绝，绝不 open）。-wal 不存在时
+        主文件必为完整事实（SQLite 原子性：未合并的提交只可能在 -wal 里），用
+        immutable=1 避免只读连接尝试创建 -shm 失败；此时若恰有并发写者开始首个
+        提交，读到的可能是上一份快照（status 轻微滞后，无写入副作用）。
+        """
+        if self._conn is not None:
+            return
+        if not self.path.is_file():
+            raise CompanionError("事实库不是普通文件或不存在：%s" % self.path)
+        immutable = "" if Path(str(self.path) + "-wal").exists() else "&immutable=1"
+        conn = sqlite3.connect("file:%s?mode=ro%s" % (quote(str(self.path)), immutable),
+                               uri=True, timeout=5.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+        except BaseException:
+            conn.close()
+            raise
+        self._conn = conn
+        self._readonly = True
 
     def close(self):
         if self._conn is None:
@@ -266,12 +293,16 @@ class Store:
 
     def checkpoint(self):
         self._ensure_open()
+        if self._readonly:
+            raise CompanionError("只读连接不可执行 checkpoint：%s" % self.path)
         return self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
 
     @contextlib.contextmanager
     def transaction(self):
         """写事务边界：BEGIN IMMEDIATE → 提交；任一异常整体回滚。不可嵌套。"""
         self._ensure_open()
+        if self._readonly:
+            raise CompanionError("只读连接不可写：%s" % self.path)
         if self._in_transaction:
             raise CompanionError("存储写事务不可嵌套")
         conn = self._conn

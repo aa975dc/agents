@@ -21,12 +21,16 @@
 同指纹（崩溃残留）→ 按幂等键去重接管补齐。manifest（来源 sha256/字节/行数、
 schema_version、时间、legacy 快照字段）写 store_meta，与事件同库持久。
 
-fallback_export：从库只读重建旧 schema 形状的 JSON 草稿（state 可被 core.Project
-直接 load；执行中任务降级为 pending），写出目录由调用方指定，绝不触碰项目内
-原 JSON。大 payload（verification/integration/release 证据原件）随事件一次性入库，
-不在重放中反复复制。
+fallback_export（FIX-03，SR-04）：从库只读重建旧 schema 形状的 JSON 草稿（state 可被
+core.Project 直接 load）。事实源是事件日志全量折叠——迁移后新增的任务/审批/集成事件
+一律参与；无法映射到旧 schema 的事实（team-init 登记的功能、同功能的子任务、非
+verification/integration/acceptance 形状的证据等）不静默丢弃：写入 team_sidecar.json
+完整导出并在 warnings/export_manifest.json 逐条列出。状态映射显式成表（ST03：done
+不升级成 accepted，映射为 awaiting_review 待重新验收）。只读打开（mode=ro），
+不初始化/迁移 schema；绝不触碰项目内原 JSON。
 """
 import json
+import sqlite3
 from pathlib import Path
 
 from agents_kernel.atomicio import write_json
@@ -307,70 +311,159 @@ def read_manifest(store):
     return json.loads(raw) if raw is not None else None
 
 
+# 团队/迁移事件里的任务状态 → legacy 任务状态（FIX-03，ST03：done 不升级成 accepted）。
+# 值为 (legacy 状态, 降级说明)；说明为 None 表示恒等映射、无需警告。迁移导入的事件
+# 携带 legacy 状态（awaiting_review/accepted/blocked），故同表覆盖。
+_STATUS_TO_LEGACY = {
+    "pending": ("pending", None),
+    "ready": ("pending", "团队状态 ready 无 legacy 对应，导出为 pending"),
+    "running": ("pending", "团队状态 running 降级为 pending（legacy 草稿无执行记录，需重新制作）"),
+    "done": ("awaiting_review",
+             "团队状态 done 降级映射为 awaiting_review，需 legacy 重新验收（不升级为 accepted）"),
+    "failed": ("blocked", "团队状态 failed 映射为 blocked，需人工处理"),
+    "blocked": ("blocked", None),
+    "cancelled": ("pending", "团队状态 cancelled 映射为 pending，待重新安排"),
+    "awaiting_review": ("awaiting_review", None),
+    "accepted": ("accepted", None),  # accepted 另行校验证据完整性，不完整降级 awaiting_review
+}
+
+
+def _fold_store_events(store):
+    """全量事件折叠（FIX-03）：事件日志是唯一事实源，迁移后新增的任务/审批/集成
+    事件一律参与折叠，各实体取最新态。返回 (features, feature_titles, task_states,
+    evidence, release, unknown_events, events_total)。"""
+    features, titles, tasks, evidence = {}, {}, {}, {}
+    release, unknown, total = None, [], 0
+    for row in store.query_all(
+            "SELECT seq, event_type, entity_id, payload FROM events ORDER BY seq"):
+        total += 1
+        payload = json.loads(row["payload"])
+        kind = row["event_type"]
+        if kind == "scope_revision":
+            feature = payload.get("feature")
+            if isinstance(feature, dict) and feature.get("id"):
+                features[feature["id"]] = feature  # 最新 scope 胜出（与视图折叠一致）
+        elif kind == "feature_status":
+            titles[row["entity_id"]] = {"title": payload.get("title", ""),
+                                        "status": payload.get("status", "")}
+        elif kind == "task_status":
+            tasks[row["entity_id"]] = {"feature_id": payload.get("feature_id", ""),
+                                       "status": payload.get("status", "")}
+        elif kind == "evidence_registered":
+            evidence[row["entity_id"]] = payload
+        elif kind == "release_stage":
+            release = payload
+        else:  # 未知事件类型不静默丢弃，进 sidecar
+            unknown.append({"seq": row["seq"], "event_type": kind, "entity_id": row["entity_id"]})
+    return features, titles, tasks, evidence, release, unknown, total
+
+
+def _classify_evidence(evidence, features, warnings, sidecar_evidence):
+    """证据事件按 legacy 形状归类：journey/acceptance/integration/verification 进草稿，
+    其余（如 review 记录）或主体不在草稿功能集的证据进 sidecar 并逐条警告。"""
+    journey, verification, integration, acceptance = {}, {}, {}, {}
+    for entity_id, payload in evidence.items():
+        stage = payload.get("journey_stage")
+        subject = payload.get("subject_id")
+        if stage is not None:
+            journey[stage] = payload.get("record")
+        elif payload.get("kind") == "acceptance" and subject in features:
+            acceptance[subject] = payload.get("acceptance")
+        elif payload.get("role") == "integration" and subject in features:
+            integration[subject] = payload.get("integration")
+        elif payload.get("role") == "verification" and subject in features:
+            verification[subject] = payload.get("verification")
+        else:
+            sidecar_evidence.append(dict(payload, evidence_id=entity_id))
+            warnings.append("证据 %s 无法映射到旧 schema（主体 %s），完整原件见 team_sidecar.json"
+                            % (entity_id, subject))
+    return journey, verification, integration, acceptance
+
+
 def fallback_export(project_dir, out_dir, *, db_path=None):
     """从 SQLite 事实库只读导出旧 schema 形状的 JSON 草稿到 out_dir（调用方指定目录）。
 
-    - state.json 草稿可被 core.Project(project).load() 直接读取（执行中任务降级 pending、
-      证据缺失的 accepted 降级 awaiting_review，均记入 warnings）。
-    - 每份草稿带 exported_from_store:true 标记；绝不写项目 .dev-companion 下的原文件。
-    - 未迁移过的库（无 manifest）明确报错。
+    FIX-03（SR-04）：
+    - 事实源 = 事件日志全量折叠（含迁移后新增的任务/审批/集成事件），导出 manifest
+      记录 events_total 等计数，调用方据此核对导出完整性。
+    - 状态映射显式（_STATUS_TO_LEGACY）：done→awaiting_review（不升级 accepted），
+      ready/running/cancelled→pending，failed→blocked；每种非恒等映射在 warnings
+      逐条声明。accepted 仍校验证据完整性，不完整降级 awaiting_review。
+    - 无法映射到旧 schema 的事实（team-init 功能、同功能子任务、review 等异形证据、
+      未知事件）不静默丢弃：写 team_sidecar.json 完整导出 + warnings 逐条列出。
+    - 写出 export_manifest.json（计数/文件清单/警告），供回退前核对。
+    - state.json 草稿可被 core.Project(project).load() 直接读取；只读打开，不初始化
+      /迁移 schema；绝不写项目 .dev-companion 下的原文件；未迁移过的库（无 manifest）
+      明确报错。
     """
     root = realpath(project_dir)
     db_path = Path(db_path) if db_path is not None else root / ".dev-companion" / "store.db"
     if not db_path.exists():
         raise CompanionError("事实库不存在，无法导出：%s" % db_path)
     store = db.Store(db_path)
-    store.open()
     try:
-        manifest = read_manifest(store)
+        try:
+            store.open_readonly()
+            manifest = read_manifest(store)
+        except sqlite3.Error as exc:
+            raise CompanionError(
+                "事实库损坏或不是有效的 SQLite 库：%s（%s）" % (db_path, exc)) from exc
         if manifest is None:
             raise CompanionError("该库尚未执行过 JSON 导入（无 manifest），没有可导出的迁移数据")
         legacy = manifest.get("legacy") or {}
-        warnings = []
-        features, verification, integration, acceptance, journey_records = {}, {}, {}, {}, {}
-        for row in store.query_all(
-                "SELECT entity_id, event_type, payload FROM events ORDER BY seq"):
-            payload = json.loads(row["payload"])
-            if row["event_type"] == "scope_revision":
-                feature = payload.get("feature")
-                if isinstance(feature, dict) and feature.get("id") not in features:
-                    features[feature["id"]] = feature
-            elif row["event_type"] == "evidence_registered":
-                stage = payload.get("journey_stage")
-                if stage is not None:
-                    journey_records[stage] = payload.get("record")
-                elif payload.get("kind") == "acceptance":
-                    acceptance[payload.get("subject_id")] = payload.get("acceptance")
-                elif payload.get("role") == "integration":
-                    integration[payload.get("subject_id")] = payload.get("integration")
-                elif payload.get("role") == "verification":
-                    verification[payload.get("subject_id")] = payload.get("verification")
-        statuses = {row["task_id"]: row["status"]
-                    for row in store.query_all("SELECT task_id, status FROM task_view")}
+        warnings, sidecar_evidence = [], []
+        features, titles, task_states, evidence, release, unknown, events_total = \
+            _fold_store_events(store)
+        journey_records, verification, integration, acceptance = _classify_evidence(
+            evidence, features, warnings, sidecar_evidence)
+
+        # team-init 登记的功能没有 scope/验收事实，旧 schema 无法表达（草稿不伪造）
+        for fid, info in titles.items():
+            if fid not in features:
+                warnings.append("功能 %s 由 team 登记且无范围/验收事实，无法进入旧 schema，"
+                                "完整事实见 team_sidecar.json" % fid)
+        # 旧 schema 每功能恰好一个与功能同 id 的任务：子任务/归属不符的任务进 sidecar
+        own_status = {}
+        sidecar_tasks = []
+        for tid, state in task_states.items():
+            fid = state["feature_id"]
+            if tid == fid and fid in features:
+                own_status[fid] = state["status"]
+            else:
+                sidecar_tasks.append(dict(state, task_id=tid))
+                warnings.append("任务 %s（功能 %s）无法用旧 schema 表达（旧格式每功能仅一个"
+                                "任务），完整事实见 team_sidecar.json" % (tid, fid))
+
         tasks = {}
-        for feature in features.values():
-            fid = feature["id"]
-            status = statuses.get(fid, "pending")
-            task = {"status": status}
+        for fid, feature in features.items():
+            raw = own_status.get(fid)
+            if raw is None:
+                warnings.append("功能 %s 无任务状态事件，草稿记为 pending" % fid)
+                legacy_status, note = "pending", None
+            else:
+                legacy_status, note = _STATUS_TO_LEGACY.get(
+                    raw, ("pending", "团队状态 %s 无映射，导出为 pending" % raw))
+            if note is not None:
+                warnings.append("任务 %s %s" % (fid, note))
+            task = {"status": legacy_status}
             if fid in verification:
                 task["verification"] = verification[fid]
             if fid in integration:
                 task["integration"] = integration[fid]
             if fid in acceptance:
                 task["acceptance"] = acceptance[fid]
-            if status == "running":
-                task = {"status": "pending"}
-                warnings.append("任务 %s 导入时正在执行，草稿降级为 pending" % fid)
-            if task["status"] == "accepted":
+            if legacy_status == "accepted":
                 check, record = task.get("verification") or {}, task.get("acceptance") or {}
                 if (check.get("passed") is not True or not check.get("id") or
                         record.get("verification_id") != check.get("id") or not record.get("note")):
                     task["status"] = "awaiting_review"
                     warnings.append("任务 %s 的验收证据不完整，草稿降级为 awaiting_review" % fid)
             tasks[fid] = task
+
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         written = {}
+        head_seq = events.view_head(store)
         if features:
             state = {"schema_version": 1, "project": str(root),
                      "revision": legacy.get("revision", 1),
@@ -393,23 +486,51 @@ def fallback_export(project_dir, out_dir, *, db_path=None):
             path = out_dir / "journey.json"
             write_json(path, journey)
             written["journey.json"] = str(path)
-        row = store.query_one(
-            """SELECT payload FROM events WHERE event_type = 'release_stage'
-               ORDER BY seq DESC LIMIT 1""")
-        if row is not None:
-            release = (json.loads(row["payload"]).get("release") or {})
-            stage_row = store.query_one("SELECT stage FROM release_view WHERE release_id = 'release'")
+        if release is not None:
+            inner = release.get("release") or {}
             draft = {"schema_version": 1, "project": str(root),
-                     "revision": release.get("revision", legacy.get("release_revision", 1)),
-                     "config": release.get("config", {}), "binding": release.get("binding", {}),
-                     "status": stage_row["stage"] if stage_row else "prepared",
-                     "evidence": release.get("evidence", {}), "history": [],
-                     "updated_at": release.get("updated_at", ""),
+                     "revision": inner.get("revision", legacy.get("release_revision", 1)),
+                     "config": inner.get("config", {}), "binding": inner.get("binding", {}),
+                     "status": release.get("stage", "prepared"),
+                     "evidence": inner.get("evidence", {}), "history": [],
+                     "updated_at": inner.get("updated_at", ""),
                      "exported_from_store": True, "exported_at": db.utcnow()}
             path = out_dir / "release.json"
             write_json(path, draft)
             written["release.json"] = str(path)
-        return {"out_dir": str(out_dir), "files": written, "head_seq": events.view_head(store),
-                "warnings": warnings, "sources_sha256": manifest.get("sources_sha256")}
+        sidecar = None
+        if sidecar_tasks or sidecar_evidence or unknown or any(
+                fid not in features for fid in titles):
+            sidecar_payload = {"schema_version": 1, "project": str(root),
+                               "exported_from_store": True, "exported_at": db.utcnow(),
+                               "sources_sha256": manifest.get("sources_sha256"),
+                               "head_seq": head_seq, "events_total": events_total,
+                               "features": [dict(titles[fid], feature_id=fid)
+                                            for fid in titles if fid not in features],
+                               "tasks": sidecar_tasks, "evidence": sidecar_evidence,
+                               "events": unknown, "warnings": warnings}
+            sidecar = str(out_dir / "team_sidecar.json")
+            write_json(Path(sidecar), sidecar_payload)
+        counts = {"events_total": events_total, "features": len(features),
+                  "tasks": len(tasks), "journey_records": len(journey_records),
+                  "release": 1 if release is not None else 0,
+                  "sidecar_features": sum(1 for fid in titles if fid not in features),
+                  "sidecar_tasks": len(sidecar_tasks),
+                  "sidecar_evidence": len(sidecar_evidence),
+                  "unknown_events": len(unknown)}
+        export_manifest = {"schema_version": 1, "exported_from_store": True,
+                           "project": str(root), "store": str(db_path),
+                           "sources_sha256": manifest.get("sources_sha256"),
+                           "head_seq": head_seq, "counts": counts,
+                           "files": dict(written,
+                                         **({"team_sidecar.json": sidecar} if sidecar else {})),
+                           "events_log": "team_events.json",
+                           "warnings": warnings, "exported_at": db.utcnow()}
+        manifest_path = out_dir / "export_manifest.json"
+        write_json(manifest_path, export_manifest)
+        return {"out_dir": str(out_dir), "files": written, "sidecar": sidecar,
+                "manifest": str(manifest_path), "head_seq": head_seq,
+                "warnings": warnings, "sources_sha256": manifest.get("sources_sha256"),
+                "counts": counts}
     finally:
         store.close()

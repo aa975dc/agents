@@ -167,7 +167,13 @@ def _wrapped_lstat(path, *args, **kwargs):
 
 
 def _wrapped_connect(database, *args, **kwargs):
-    _rec(_bucket(database) if isinstance(database, (str, bytes, os.PathLike))
+    target = database
+    if isinstance(target, str) and target.startswith("file:"):
+        # FIX-01 起只读打开经 SQLite URI（file:...?mode=ro[&immutable=1]）：
+        # 按其内嵌路径归类，仍计入 facts（连接目标没有变，只是 URI 形式）。
+        from urllib.parse import unquote, urlsplit
+        target = unquote(urlsplit(target).path)
+    _rec(_bucket(target) if isinstance(target, (str, bytes, os.PathLike))
          else "runtime", "sqlite_connects")
     return _real_connect(database, *args, **kwargs)
 

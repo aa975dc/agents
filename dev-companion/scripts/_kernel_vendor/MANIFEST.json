@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T17:06:15+00:00",
+  "generated_at": "2026-09-20T18:22:01+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "baace06993efb531cf7ec8c6f04ff3a7238c63f5"
+    "commit": "174d9d62873780e45396b44d7c9408dad4433847"
   },
   "target": {
     "plugin": "dev-companion",
@@ -17,8 +17,8 @@
     },
     {
       "path": "agents_kernel/atomicio.py",
-      "sha256": "8c0ba394fdb9937b744f6881e8debf02e6e1a428d83b17f2500d24d5a2ea7969",
-      "bytes": 2130
+      "sha256": "9793ab6448f73f03827085e25dcc6658d5757756cdc370094f89c2d7285bdbfe",
+      "bytes": 5177
     },
     {
       "path": "agents_kernel/contracts/__init__.py",
@@ -217,8 +217,8 @@
     },
     {
       "path": "agents_kernel/services/resume.py",
-      "sha256": "ca43e428275f98689e59a5b9018986a5fcc938b303d9d3af6290df51ba186f07",
-      "bytes": 14519
+      "sha256": "b1ba4e2ff387750796bea245bac8d591ae6db5d93a0cdc01298730ce4fd3f743",
+      "bytes": 18296
     },
     {
       "path": "agents_kernel/services/review_board.py",
@@ -242,8 +242,8 @@
     },
     {
       "path": "agents_kernel/storage/db.py",
-      "sha256": "118881eceafd5a384f7de2e03f3752d1fad431c510452a7a502a4918c6d14bcd",
-      "bytes": 10375
+      "sha256": "38990956aeec6447f627689878345b2aa1596fffeb4a6a66d371e052780c6dfd",
+      "bytes": 12003
     },
     {
       "path": "agents_kernel/storage/events.py",
@@ -257,13 +257,13 @@
     },
     {
       "path": "agents_kernel/storage/migration.py",
-      "sha256": "f53e85ac7073806493e17ec388fbe11a4f66cf3d2741c5f0ef71e560cf74324d",
-      "bytes": 23944
+      "sha256": "94c0097fd5b80d2c79f56b2a722381b8f4ae9e02097634cc09a2eda88d1f6333",
+      "bytes": 31372
     },
     {
       "path": "agents_kernel/storage/team.py",
-      "sha256": "640216bf54f7ac8f7a40701911ffe4277e35de85caff91ab33632b0973186c58",
-      "bytes": 13317
+      "sha256": "c0a03e8e9ab923908439e4931d3158cc088cc7bccc7cfcf07444a253fe04473d",
+      "bytes": 16929
     },
     {
       "path": "agents_kernel/validation.py",
