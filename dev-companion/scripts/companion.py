@@ -3,31 +3,13 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import sys
 import tempfile
 
+import kernel_bootstrap  # noqa: F401 — P2-05 单处引导：优先本目录 _kernel_vendor，回退仓库 packages/
+
 from core import CompanionError, Project, read_json, render_html, render_markdown
-
-
-def _kernel_path():
-    """定位仓库根 packages/agents_kernel 并加入 sys.path（用 __file__ 相对定位）。
-
-    兼容从仓库（<repo>/dev-companion/scripts）与从插件目录（scripts 与 packages 同根）
-    两种布局。脱离仓库根的独立安装产物由 P2-05 的 vendor 构建提供
-    （02_TARGET_ARCHITECTURE.md §3），此处不引入第二套机制。
-    """
-    for base in Path(__file__).resolve().parents:
-        if (base / "packages" / "agents_kernel").is_dir():
-            packages = str(base / "packages")
-            if packages not in sys.path:
-                sys.path.insert(0, packages)
-            return
-    raise ImportError("找不到 agents_kernel：需要仓库根 packages/agents_kernel（插件独立分发由 vendor 构建提供）")
-
-
-_kernel_path()
 
 from agents_kernel.paths import absolute, inside, realpath
 

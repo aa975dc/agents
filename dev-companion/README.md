@@ -87,9 +87,9 @@
 
 需要 ZCode 的文件、进程执行和 Agent 能力。没有独立 Agent 时保留待检查；自动测试无法证明主观体验，CLI 也不是执行沙箱。文件指纹单文件上限 20 MiB、累计 100 MiB、最多 10000 个文件；排除的敏感配置、数据库和外部服务变化需主动记录并重新核验。
 
-实际宿主验证分为清单校验、安装发现、模型执行、完整派发和真实用户试用。这些层次分别记录，不能互相替代。新版的实际结果和待验证范围见 [生命周期实施记录](../docs/dev-companion-lifecycle.md)；旧版记录见 [既有评审](../docs/dev-companion-review.md)。
+实际宿主验证分为清单校验、安装发现、模型执行、完整派发和真实用户试用。这些层次分别记录，不能互相替代。新版的实际结果和待验证范围见 [生命周期实施记录](https://github.com/aa975dc/agents/blob/main/docs/dev-companion-lifecycle.md)；旧版记录见 [既有评审](https://github.com/aa975dc/agents/blob/main/docs/dev-companion-review.md)。
 
-技术接口见 [CLI 约定](references/cli-contract.md)，完整规划与发布输入见 [输入示例](references/lifecycle-inputs.md)，宿主协作见 [ZCode 接入](references/zcode-integration.md)。
+技术接口见 [CLI 约定](references/cli-contract.md)，完整规划与发布输入见 [输入示例](references/lifecycle-inputs.md)，宿主协作见 [ZCode 接入](references/zcode-integration.md)。本目录 `scripts/_kernel_vendor/` 含构建生成的共享内核私有副本，请勿手改：由仓库根 `tools/build_vendor.py` 从 `packages/agents_kernel` 复制并做哈希校验（清单见其 `MANIFEST.json`），插件独立安装（仓库外）时由它提供内核。
 
 ## 体验完整流程
 

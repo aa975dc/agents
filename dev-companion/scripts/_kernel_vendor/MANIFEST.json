@@ -1,0 +1,119 @@
+{
+  "manifest_version": 1,
+  "generated_at": "2026-09-20T06:38:37+00:00",
+  "source": {
+    "path": "packages/agents_kernel",
+    "commit": "20f61ed4a1816f2ae44219fa1f7d8e4f5df2aeb7"
+  },
+  "target": {
+    "plugin": "dev-companion",
+    "vendor_dir": "dev-companion/scripts/_kernel_vendor"
+  },
+  "files": [
+    {
+      "path": "agents_kernel/__init__.py",
+      "sha256": "80697c38422ed7283b9849ac64ffadce7250359e4e135eb1d037323e2ee7ad0a",
+      "bytes": 930
+    },
+    {
+      "path": "agents_kernel/atomicio.py",
+      "sha256": "8c0ba394fdb9937b744f6881e8debf02e6e1a428d83b17f2500d24d5a2ea7969",
+      "bytes": 2130
+    },
+    {
+      "path": "agents_kernel/digest.py",
+      "sha256": "c8cd63984d71b40bc4733edd5ff269484a06d3f79998e7268b18effb9f230dcb",
+      "bytes": 1684
+    },
+    {
+      "path": "agents_kernel/domain/__init__.py",
+      "sha256": "0975e263871c098bdd84851d767d5218c390653fa1f2867b73cbe9ba4e4a21f1",
+      "bytes": 294
+    },
+    {
+      "path": "agents_kernel/domain/views.py",
+      "sha256": "e2100768351e7344040a8368ca9bd27981b269e729fead80b368b9de015b7224",
+      "bytes": 8077
+    },
+    {
+      "path": "agents_kernel/filesystem/__init__.py",
+      "sha256": "981577f3b71854c870969027deadbdd031aa816cd9c758964c57379a08a34851",
+      "bytes": 94
+    },
+    {
+      "path": "agents_kernel/filesystem/walk.py",
+      "sha256": "35ceffdeaea84cd9186285e43440ce438789605e9712e2b4e1b1692bf2e2f19f",
+      "bytes": 10276
+    },
+    {
+      "path": "agents_kernel/indexing/__init__.py",
+      "sha256": "cf9d12234d9b22d8ca82e8bad1cac3709b91bfc2f852108ccf5bcb24a459d9b6",
+      "bytes": 386
+    },
+    {
+      "path": "agents_kernel/indexing/reader.py",
+      "sha256": "b2ab9367ac7b5ba95856ee8153e7b311576c58488bc816d548eaeec067b62837",
+      "bytes": 5508
+    },
+    {
+      "path": "agents_kernel/indexing/scanner.py",
+      "sha256": "bea283031f0911105268f01b7630d6b33ce6b878e38a439ae7b045dee34fd386",
+      "bytes": 9607
+    },
+    {
+      "path": "agents_kernel/paths.py",
+      "sha256": "741117dd91f7f25206bd3ceb1ea43d7706edaf2e71d83a864b0c032646c2c141",
+      "bytes": 2104
+    },
+    {
+      "path": "agents_kernel/presentation/__init__.py",
+      "sha256": "6b9f47686da1b86025cd4e23e45c2969d74684a8162a7bb2a7f22c3b90488f7b",
+      "bytes": 280
+    },
+    {
+      "path": "agents_kernel/presentation/status_view.py",
+      "sha256": "237b34ca644f54d2373cfcd3622dc6d50fafb30a587e7f260bf1948f109ac609",
+      "bytes": 3122
+    },
+    {
+      "path": "agents_kernel/process.py",
+      "sha256": "95aeecd028b84618846c5ef211d0ebfbf1b0bc561f6c80c7bcfdba4b6054319f",
+      "bytes": 3143
+    },
+    {
+      "path": "agents_kernel/services/__init__.py",
+      "sha256": "c8b486353823f9639f99d6ac6f890a2d8abcfc8225b1549982286ea7922bf8f7",
+      "bytes": 169
+    },
+    {
+      "path": "agents_kernel/services/request_cache.py",
+      "sha256": "98619c1acc541440e3b87a7b7c41fa2cd313698ba26f182a60f227af66564a0a",
+      "bytes": 2121
+    },
+    {
+      "path": "agents_kernel/storage/__init__.py",
+      "sha256": "48b567c9f0a801a01f0cb8bd5c6c6372f69a843176405bbf07338bb81775b0d0",
+      "bytes": 391
+    },
+    {
+      "path": "agents_kernel/storage/db.py",
+      "sha256": "118881eceafd5a384f7de2e03f3752d1fad431c510452a7a502a4918c6d14bcd",
+      "bytes": 10375
+    },
+    {
+      "path": "agents_kernel/storage/events.py",
+      "sha256": "43c28f37fe9c2d2a5933e2a4627ea03b4906c1034f0bf44ef38a6d55c7d33fb0",
+      "bytes": 4683
+    },
+    {
+      "path": "agents_kernel/storage/migration.py",
+      "sha256": "f53e85ac7073806493e17ec388fbe11a4f66cf3d2741c5f0ef71e560cf74324d",
+      "bytes": 23944
+    },
+    {
+      "path": "agents_kernel/validation.py",
+      "sha256": "cbe69389f0ad976906bd57c29323c766c1f9cb69d346a35045a8e1bd3ea61be3",
+      "bytes": 3808
+    }
+  ]
+}
