@@ -1,0 +1,34 @@
+{
+  "kind": "resume_card_pointer_not_runtime_state",
+  "repo_id": "aa975dc/agents (local: /Users/youxididai/Documents/cj/agents, branch optimization-v1)",
+  "base_commit_or_manifest": "a397ead..f9a9543 (16 commits since baseline 204a9146; see progress-checkpoint-2026-09-20.md for the full list)",
+  "active_store_reference": "docs/verification/progress-checkpoint-2026-09-20.md",
+  "current_phase": "P1-05 H06 E2E (round 5 stopped by provider quota 1310 at G3; fix for the G5 blocker already committed in 1359e6b)",
+  "scope_version": "agents_optimization_v1_20260920",
+  "source_generation": null,
+  "completed_task_ids": ["P0-01", "P0-02", "P0-03", "P1-01", "P1-02", "P1-03", "P1-04", "P2-01", "P2-02", "P2-03", "P2-04", "P2-05", "P3-01", "P4-01", "P4-02"],
+  "active_attempts": [
+    {
+      "task_id": "P1-05",
+      "what": "H06 real-host E2E round 5",
+      "run_id": "dwfrun-6859f047-0f8d-438a-b984-858c15a7d4b8",
+      "resume": "quota reset 2026-09-23 21:32 -> ResumeWorkflowRun (precheck/G1/G2 replay from journal); if that run is no longer resumable, fresh CreateWorkflow with path=<repo>/code-analysis-swarm/workflow/code-analysis.dwf.ts and args {target:/tmp/h06-fixture, team_root:<repo>/code-analysis-swarm} (AmendWorkflow does NOT inherit args)"
+    },
+    {
+      "task_id": "P3-02",
+      "what": "incremental indexing — partial: packages/agents_kernel/indexing/content_hash.py (124 lines, parses, NO tests) left UNCOMMITTED in working tree; modules.py/edges.py/closure.py + tests not started",
+      "resume": "review/finish content_hash.py, add tests, then modules/edges/closure per original dispatch"
+    }
+  ],
+  "blocked_tasks": ["P3-02 (quota)", "P1-05 H06 final pass (quota)", "P3-03..P7-06 (not started, dependency-gated)"],
+  "next_ready_task_ids": ["P1-05 (H06 finish)", "P3-02 (finish partial)", "P3-03", "P3-05", "P4-03", "P4-04"],
+  "approval_references": ["LICENSE selection = LICENSE_DECISION_REQUIRED (user only)", "no push/no merge to main/no publish (standing instruction)", "quota reset 2026-09-23 21:32:18"],
+  "host_capabilities_reference": "docs/host-contract/host-probe-2026-09-20.md (5 facade constraints + publish boundary + exclusive mkdir, all real-host evidence)",
+  "capacity_certifications": {
+    "L": "NOT_RUN",
+    "XL": "NOT_RUN",
+    "XXL": "NOT_RUN"
+  },
+  "test_totals_at_checkpoint": "python unittest 218 OK; node 48 pass (36 mock + 12 guard); vendor manifest synced",
+  "instruction": "从事实Store核对，不从本卡直接恢复accepted或猜测进度；旧进程停止状态必须实际核实。"
+}

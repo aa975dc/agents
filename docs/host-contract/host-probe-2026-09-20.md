@@ -61,6 +61,8 @@
 1. **agent 禁止取引用（含类型位置）**：`ReturnType<typeof agent>` → 编译拒绝："facade function 'agent' may only be called directly; taking a reference to it defeats site identity (journal and replay key off call sites)"。修复：缓存表直接以 facade 的 `Agent` 接口类型持有调用返回值。
 2. **facade 值禁止重定型为本地结构接口**：自定义 `interface Actor { ask… }` 承接 agent 返回值 → 编译拒绝："retyping a facade value to a structurally-compatible non-facade type escapes site identity"。修复：改用 facade 声明的 `Agent` 类型。
 3. **ask<T> 的 T 必须是具体可序列化接口**：泛型函数 `askGate<T>` 内部 `ask<T>` → 提交拒绝："unsupported ask result type: type is not JSON-serializable"。修复：ask 调用移至各调用点并绑定具体接口（ModuleResult/Specialty/VerdictBundle/ReportFile），askGate 只承接回流循环；内联对象类型 `{verdicts:…}` 一并改为命名接口 VerdictBundle。
+4. **artifact 元数据硬上限（H06 第 4 轮 G5 真实撞上）**：`artifact.markdown` 的 `opts.description` 613 字符 → 运行时抛错 "over the cap of 500"（title 上限 120）。修复：clampMeta 统一截断，try/catch 两个发布点共用。该轮同时实证：G1–G4 全部真实通过（A6 独立复核 14/14 verdicts confirmed，各带 own_evidence），blocked 时 17 条发现+14 条结论经 salvage 完整保留并发布 partial-report。
+5. **AmendWorkflow 不继承上一轮 args**：以 path 重提时若不带 args，参数检查即 blocked（"target 不能为空"）——H06 第 2→3 轮曾连踩多次；正确做法是全新 CreateWorkflow 带 args，或 amend 时显式传 args。
 
 结论：仅靠 Node mock 与 tsc 无法证明 DWF 兼容性（Z19 的核心论断再获实证）；修复后的 dwf.ts 于 dwfrun-2bea6e0b 首次通过真实编译并执行。
 
