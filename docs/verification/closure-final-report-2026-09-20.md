@@ -73,3 +73,25 @@ LICENSE 选择｜0.3.0 安装升级｜XL/XXL 大档压测｜全量深读模型�
 **候选更新**：1a7bc698 → **548f03a056600fe5b896cf09cf87080e60866944**（本轮 8 提交）。测试：python **725 collected / 725 testsRun / 725 success / 0 failure / 0 error**（12 类级门控 skip=34 方法不运行，另 1 方法级 darwin skip 待 Linux 复跑确认）；node **65/65**。复核者两条 Linux 测试失败（r05 路径、vendor git 前提）均已修复为可移植/分形态断言；其证据身份保留于 docs/verification/fix-review/。
 
 **边界（如实）**：真实宿主 0.3.0 团队验收、>200 文件 DWF 大清单端到端、XL/XXL 大档、冷缓存、Windows、Linux 本轮复跑——均 NOT_RUN/待授权。SR-05 的 runbook 交互细节（浏览器走查等）仍属宿主门。
+
+## 三项收口轮（FIX02/04/05-followup，2026-09-21；候选 3cec37937a42005630f837a206fa259759aaf636）
+
+独立复核者对 bf974a97 给出 CHANGES_REQUIRED（三条收口链）。先复现、再最小修复，全部转为
+负向断言+正向对照（探针按 HARNESS_ERROR 归档，见 fix-review2/probe-status-3cec379.md）：
+
+- **FIX02-followup**：exclusive_lock 空文件窗口（双进程同时入界，双解释器复现）→ v2 原子
+  发布拥有者记录（fsync+os.link，锁文件要么不存在要么内容完整）+ owner_token 身份释放/
+  接管；空/半写不当死 PID 证明（宽限后接管+警告）。10 项新测试（双进程 max 并发==1、顺序
+  进展、产品错误码拒绝、强杀恢复）。旧探针 BrokenBarrierError 证据分类纠正为 HARNESS_ERROR。
+- **FIX04-followup**：批准/集成未绑定实际产物 → report 采集逐文件真实 sha（changed_files ⊆
+  allowed_paths 逐条核对），done/integrate 前复核当前 sha==报告 sha（漂移 exit 2 指名文件
+  与新旧哈希）；integrate manifest 记录 regressed_on sha 集合，feature_level 仍如实 unknown；
+  重报幂等键修复为 <attempt>:<sha>；合法新版本重报→重审→重测正向对照通过。
+- **FIX05-followup**：G2 标记互覆 → per-chunk 唯一键文件（N 成功=N 恢复，幂等）；12k 块
+  init/read 全有界；index-verify 流式聚合指纹（常规路径不装全集）；chunks-page 真分页；
+  A1/argv 不再携带全路径；acquire resume 语义（同锚 adopt/异锚拒绝，新建排他不放松）；
+  续接闭合 3+2=5 双证明。
+
+测试：python **759 collected/759 testsRun/759 success/0 fail/0 error**（12 类级门控 skip）；
+node **66/66**。两插件 vendor 逐文件核验一致（52+52）。保留项不变：宿主安装/真实团队验收、
+>200 文件端到端、XL/XXL 大档、冷缓存、Windows、Linux 复跑、LICENSE——均 NOT_RUN/BLOCKED。
