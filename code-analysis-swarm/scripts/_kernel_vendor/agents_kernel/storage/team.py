@@ -27,6 +27,15 @@ completed）。前置不满足即拒绝并明确缺什么，不写任何事件�
 转换经 domain.tasks 白名单拒绝。门禁前置从事件回放（TaskBoard/ReviewBoard/
 IntegrationBoard 真实重建）查询，历史事实经 TaskBoard.adopt_task 原样重建、
 不做白名单重审（门禁只管新写入）。
+
+FIX04-followup（2026-09 复核 §4：门禁与实际文件版本没有闭环）：attempt 显式绑定
+真实工作区产物——team-report 对 changed_files 逐条核对 ⊆ 任务 allowed_paths（越界
+即拒），并在报告时点真实读取每个改动文件计算内容 sha256（file_shas，摘要由采集
+产生而非仅收字符串）；done 前与 team-integrate 入列前对同一批文件复核"当前内容
+sha == 报告时 sha"，漂移/缺失即拒绝（ReviewBoard 的 sha 绑定使旧批准对新回报自动
+失效，须重新 report→approve→done）；集成把"回归运行于哪个 sha 集合"记进版本级
+回归与完成证据（regressed_on）。修复前落库的历史回报无 file_shas，按"门禁只管
+新写入"口径跳过产物复核，与 adopt_task 同一原则。
 """
 import json
 import os
@@ -36,6 +45,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from agents_kernel import digest
 from agents_kernel.atomicio import write_json
 from agents_kernel.domain import views
 from agents_kernel.domain.review_record import ReviewRecord, attempt_id
@@ -131,14 +141,17 @@ def _open_existing(path):
 
 
 def set_task_status(project_dir, task_id, feature_id_value, status, *, expect_seq=None,
-                    reason=None, blocked_by=()):
+                    reason=None, blocked_by=(), workspace=None):
     """team-task：经门禁的状态转换（FIX-04/SR-01：白名单只是词法，门禁才是语义）。
 
     - ready/running：任务必须已存在（team-task-add），转换经 domain.tasks 白名单；
       running 强制创建 attempt（attempt_no 递增 + started_at，写入事件）。
     - done：前置门——(a) 未完结 attempt；(b) 该 attempt 有 succeeded 回报；
-      (c) feature review_required 时有有效独立审查批准（ReviewBoard 语义）；
-      (d) done 事件与完成证据（evidence_view 行）同一 SQLite 事务提交，缺一整体回滚。
+      (c) feature review_required 时的有效独立审查批准（ReviewBoard 语义）；
+      (d) done 事件与完成证据（evidence_view 行）同一 SQLite 事务提交，缺一整体回滚；
+      (e) FIX04-followup：回报的每个改动文件当前内容 sha 必须仍等于报告时采集的
+      sha，且 changed_files ⊆ allowed_paths（产物漂移=拒绝，指出文件与新旧哈希）。
+      workspace 指定产物核验目录（缺省项目根；实现在独立 worktree 时传其路径）。
       缺任一前置即拒绝并逐条列出缺什么，不写任何事件。
     - blocked/cancelled：必须 --reason（Z24 统一入口语义，来源状态白名单校验）。
     - failed：须有进行中 attempt（running→failed），关闭该 attempt 并要求 --reason。
@@ -173,7 +186,8 @@ def set_task_status(project_dir, task_id, feature_id_value, status, *, expect_se
         if status == "running":
             return _action_running(facts, store, path, tid, fid, expect_seq)
         if status == "done":
-            return _action_done(facts, store, path, tid, fid, expect_seq)
+            return _action_done(facts, store, path, tid, fid, expect_seq,
+                                _resolve_workspace(project_dir, workspace))
         if status == "failed":
             return _action_failed(facts, store, path, tid, fid, expect_seq, reason)
         if status == "blocked":
@@ -231,14 +245,18 @@ def add_task(project_dir, task_id, feature_id_value, kind, depends_on=(), priori
 
 
 def report(project_dir, task_id, outcome, summary, changed_files=(), artifact_sha256=None,
-           *, expect_seq=None):
+           *, expect_seq=None, workspace=None):
     """team-report：attempt 回报动作（done 前置门 (b) 的事实来源）。
 
     回报绑定当前未完结 attempt（task_id#attempt_no），携带 outcome/summary/
     changed_files 与产出固定 artifact_sha256；回报即实现者以该固定版本提交审查
     （ReviewBoard.submit_for_review 校验，team-approve 只能审这个 sha）。
-    没有进行中 attempt（未 running 或已关闭）即拒绝。outcome=failed 的回报不关
-    attempt——关闭用 team-task --status failed --reason（TK08：失败重试开新 attempt）。
+    FIX04-followup：changed_files 逐条核对 ⊆ 任务 allowed_paths（越界即拒并指出
+    越界文件），且每个改动文件在报告时点从工作区（workspace，缺省项目根）真实
+    读取并计算内容 sha256 记入 file_shas——报告摘要由真实采集产生，done/integrate
+    据此绑定实际产物版本。没有进行中 attempt（未 running 或已关闭）即拒绝。
+    outcome=failed 的回报不关 attempt——关闭用 team-task --status failed --reason
+    （TK08：失败重试开新 attempt）。
     """
     tid = text(task_id, "任务编号")
     if outcome not in ("succeeded", "failed"):
@@ -246,6 +264,7 @@ def report(project_dir, task_id, outcome, summary, changed_files=(), artifact_sh
     summary = text(summary, "回报摘要")
     sha = _check_sha256(artifact_sha256)
     changes = [relative_path(p) for p in list(changed_files)]
+    root = _resolve_workspace(project_dir, workspace)
     path = team_db_path(project_dir)
     store = _open_existing(path)
     try:
@@ -259,6 +278,7 @@ def report(project_dir, task_id, outcome, summary, changed_files=(), artifact_sh
                                  % tid)
         no = attempts[-1]["attempt_no"]
         ref = attempt_id(tid, no)
+        file_shas = _collect_file_shas(root, entry["allowed_paths"], changes)
         facts.review_board.submit_for_review(attempts[-1], sha)  # 最新 attempt 才可提交
         payload = {"kind": "check", "role": "report", "subject_id": ref,
                    "result": outcome, "source": "team-gate",
@@ -266,16 +286,21 @@ def report(project_dir, task_id, outcome, summary, changed_files=(), artifact_sh
                    "fact": {"task_id": tid, "attempt_no": no, "outcome": outcome,
                             "summary": summary,
                             "changed_files": list(dict.fromkeys(changes)),
-                            "artifact_sha256": sha}}
+                            "artifact_sha256": sha, "file_shas": file_shas}}
         writer = db.acquire_writer(store)
         try:
+            # 幂等键含固定版本 sha：同一版本重报去重；合法重报（内容变化→新 sha）
+            # 必须落为新事实——否则漂移后重走 report→approve→done 的链被旧键吞掉
+            #（FIX04-followup 正向对照：合法新版本经重新报告/批准后仍可完成）。
             result = _append_batch(store, writer.epoch, [(
                 views.EVENT_EVIDENCE_REGISTERED, "report:" + ref, payload,
-                "team-report:%s" % ref)], expect_seq=expect_seq)[0]
+                "team-report:%s:%s" % (ref, sha))], expect_seq=expect_seq)[0]
         finally:
             writer.close()
         return {"store": str(path), "task_id": tid, "attempt": ref, "outcome": outcome,
-                "artifact_sha256": sha, "seq": result["seq"], "applied": result["applied"],
+                "artifact_sha256": sha, "changed_files": list(dict.fromkeys(changes)),
+                "file_shas": file_shas,
+                "seq": result["seq"], "applied": result["applied"],
                 "deduped": result["deduped"], "generation": events.view_head(store)}
     finally:
         store.close()
@@ -347,6 +372,11 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
     批准且 sha 一致）→ 版本（内容哈希幂等）→ 两级回归登记：功能级如实记 unknown
     （team 模式未接功能级新鲜度评估；只记录不拦截），版本级 = 真实 subprocess 运行
     check_argv（shlex 切分、无 shell；退出码即通过与否）→ 通过才允许 complete。
+    FIX04-followup：入列前对每个候选任务重执行 done 门的产物核验——回归目录
+    （cwd，缺省项目根）里各改动文件的当前内容 sha 必须仍等于报告时采集值，任一
+    漂移即整体拒绝（候选失效，须重报重审）——保证被测内容就是批准/报告的版本；
+    并把每个任务的报告 sha 集合（artifact + 逐文件）作为 regressed_on 记入版本级
+    回归与完成证据（feature_level 仍如实标 unknown，不虚标已验证）。
     回归失败：候选/版本/失败回归照常落库（事实如实），status 保持 candidate，
     结果 passed=False（CLI 退出 3）。候选、版本、回归、完成证据同一事务提交。
     """
@@ -367,6 +397,7 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
     try:
         facts = _replay(store)
         artifacts = {}
+        regressed_on = {}   # FIX04-followup：回归实际运行于的报告 sha 集合（进 manifest 证据）
         for tid in tids:
             entry = facts.tasks.get(tid)
             if entry is None:
@@ -379,7 +410,11 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
             report = facts.reports.get(attempt_id(tid, attempts[-1]["attempt_no"]))
             if report is None or report.get("outcome") != "succeeded":
                 raise CompanionError("任务 %s 缺少 succeeded 回报，集成对象无固定版本" % tid)
+            file_shas = _verify_reported_files(work_dir, tid, report, action="team-integrate")
+            _verify_report_scope(tid, entry["allowed_paths"], report)
             artifacts[tid] = report["artifact_sha256"]
+            regressed_on[tid] = {"artifact_sha256": report["artifact_sha256"],
+                                 "files": dict(file_shas) if file_shas else {}}
         facts.integration.add_candidate(cid, artifacts)  # 批准/sha 一致门（真实校验）
         manifest = facts.integration.build_integration_version([cid])
         vno, sha = manifest["integration_version"], manifest["manifest_sha256"]
@@ -427,7 +462,8 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
               "result": "passed" if passed else "failed", "source": "team-gate",
               "detail": "集成版本 %d 版本级回归 %s（exit=%s）" % (vno, detail_cmd, exit_code),
               "fact": {"integration_version": vno, "command": detail_cmd,
-                       "exit_code": exit_code, "cwd": str(work_dir)}},
+                       "exit_code": exit_code, "cwd": str(work_dir),
+                       "regressed_on": regressed_on}},
              # 回归重跑是新的覆盖事实（IntegrationBoard：再次记录覆盖），键按次唯一，
              # 不随候选内容 sha 去重——同版本先失败后通过的回归不能被旧失败去重吞掉。
              "team-integrate:version-level:%d:%s" % (vno, uuid.uuid4().hex[:12])),
@@ -441,7 +477,8 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
                  "subject_id": "integration-version:%d" % vno, "result": "completed",
                  "source": "team-gate",
                  "detail": "集成版本 %d 完成 manifest=%s" % (vno, sha),
-                 "fact": {"integration_version": vno, "manifest_sha256": sha}},
+                 "fact": {"integration_version": vno, "manifest_sha256": sha,
+                          "regressed_on": regressed_on}},
                 "team-integrate:complete:%d:%s" % (vno, sha)))
             status = "completed"
         version_id = "integration-version:%d" % vno
@@ -462,9 +499,10 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
             writer.close()
         return {"store": str(path), "candidate_id": cid, "tasks": tids,
                 "integration_version": vno, "manifest_sha256": sha, "status": status,
-                "passed": passed, "version_level": {"command": detail_cmd,
-                                                    "exit_code": exit_code,
-                                                    "passed": passed},
+                "passed": passed, "regressed_on": regressed_on,
+                "version_level": {"command": detail_cmd,
+                                  "exit_code": exit_code,
+                                  "passed": passed},
                 "feature_level": feature_level,
                 "applied": sum(1 for r in results if r["applied"]),
                 "deduped": sum(1 for r in results if r["deduped"]),
@@ -480,6 +518,9 @@ def gate_check(project_dir, feature_id_value, kind="feature"):
     （review_required 时另有有效独立批准）；running 必须有未完结 attempt；blocked
     必须有原因。kind=integration 时加查集成版本：completed 必须有通过版本级回归，
     candidate 不得冒充完成。只读，不写任何事实；违例逐条列出（passed=False → CLI 3）。
+    FIX04-followup 语义澄清：本入口是台账审计（audit_only=true）——核对的是库内
+    状态与证据的一致性，不等同于功能验证/回归；实际产物版本绑定在 report/done/
+    integrate 门禁里核验，验收不得以本审计代替真实检查。
     """
     fid = text(feature_id_value, "功能编号")
     if kind not in ("feature", "integration"):
@@ -528,7 +569,7 @@ def gate_check(project_dir, feature_id_value, kind="feature"):
                     violations.append("集成版本 %d 标记 completed 但版本级回归未通过"
                                       % manifest["integration_version"])
         result = {"feature_id": fid, "kind": kind, "passed": not violations,
-                  "violations": violations,
+                  "audit_only": True, "violations": violations,
                   "tasks": [{"task_id": t["id"], "status": t["status"],
                              "kind": t["kind"]} for t in tasks],
                   "store": str(path), "generation": events.view_head(store)}
@@ -663,6 +704,82 @@ def _check_sha256(value):
             or any(ch not in "0123456789abcdef" for ch in value):
         raise CompanionError("artifact_sha256 必须是 64 位小写十六进制：%r" % (value,))
     return value
+
+
+# ---- FIX04-followup：attempt 与真实产物版本绑定（报告时采集 + 消费前复核） ----
+
+def _resolve_workspace(project_dir, workspace):
+    """产物采集/核验目录：workspace 优先，缺省项目根；先 realpath 归一（与库路径同口径）。"""
+    root = realpath(Path(workspace)) if workspace else realpath(Path(project_dir))
+    if not root.is_dir():
+        raise CompanionError("工作区目录不存在：%s" % root)
+    return root
+
+
+def _workspace_file(root, rel):
+    """改动文件的真实路径：逐段拒绝符号链接（与 core.safe_file 同口径），必须是普通文件。"""
+    target = Path(root)
+    for part in rel.split("/"):  # relative_path 已保证 POSIX 相对、无 ""/./.. 段
+        target = target / part
+        if target.is_symlink():
+            raise CompanionError("文件链接不在支持范围：" + rel)
+    if not target.is_file():
+        raise CompanionError("改动文件在 %s 下不存在（无法采集/核对内容）：%s" % (root, rel))
+    return target
+
+
+def _collect_file_shas(root, allowed_paths, changed_files):
+    """report 前置：changed_files 逐条核对 ⊆ allowed_paths（精确路径集合，越界即拒并
+    指出越界文件）；每个改动文件在报告时点真实读取并计算内容 sha256（复用
+    digest.sha256_file，报告摘要由真实采集产生，不只收调用方字符串）。"""
+    if changed_files and not set(allowed_paths):
+        raise CompanionError(
+            "回报被拒：任务未声明文件边界（allowed_paths 为空），不能回报改动文件；"
+            "请先经 team-task-add --allowed-paths 声明精确边界")
+    outside = sorted(p for p in changed_files if p not in set(allowed_paths))
+    if outside:
+        raise CompanionError(
+            "回报被拒：改动文件超出任务边界 allowed_paths：%s（任务边界：%s）"
+            % (", ".join(outside), ", ".join(sorted(allowed_paths))))
+    return {rel: digest.sha256_file(_workspace_file(root, rel))[0] for rel in changed_files}
+
+
+def _verify_reported_files(root, tid, report, action):
+    """done/integrate 前置：报告的每个改动文件当前内容 sha 必须仍等于报告时采集值
+    （内容漂移/缺失=拒绝，指出具体文件与新旧哈希；等长同 mtime 的篡改因此无效）。
+    file_shas 缺失的是本修复前落库的历史回报——按"门禁只管新写入"口径跳过
+    （与 TaskBoard.adopt_task 同一原则），返回其 file_shas（历史回报为 None）。"""
+    file_shas = report.get("file_shas")
+    if not isinstance(file_shas, dict):
+        return None
+    drifted = []
+    for rel, recorded in sorted(file_shas.items()):
+        try:
+            target = _workspace_file(root, rel)  # 与报告时同一路径策略（逐段拒链接）
+        except CompanionError:
+            drifted.append("%s：当前不存在或不可核（报告时 sha=%s）" % (rel, recorded))
+            continue
+        current = digest.sha256_file(target)[0]
+        if current != recorded:
+            drifted.append("%s：报告时 sha=%s，当前 sha=%s" % (rel, recorded, current))
+    if drifted:
+        raise CompanionError(
+            "任务 %s %s 被拒：实际产物已偏离报告版本（批准只对报告时固定版本有效，"
+            "须重新 team-report → 重新批准）：%s" % (tid, action, "；".join(drifted)))
+    return file_shas
+
+
+def _verify_report_scope(tid, allowed_paths, report):
+    """done/integrate 前置复核：回报 changed_files ⊆ allowed_paths（report 时已校验，
+    消费点再核一遍；同样只约束带 file_shas 采集数据的新回报）。"""
+    changed = report.get("changed_files")
+    if not isinstance(changed, list) or not isinstance(report.get("file_shas"), dict):
+        return
+    outside = sorted(p for p in changed if p not in set(allowed_paths))
+    if outside:
+        raise CompanionError(
+            "任务 %s 回报的改动文件超出 allowed_paths：%s（任务边界：%s）"
+            % (tid, ", ".join(outside), ", ".join(sorted(allowed_paths)) or "(空)"))
 
 
 def _append_batch(store, epoch, specs, *, expect_seq=None, verify=None):
@@ -863,7 +980,7 @@ def _action_running(facts, store, path, tid, fid, expect_seq):
                           expect_seq, key_suffix=":running")
 
 
-def _action_done(facts, store, path, tid, fid, expect_seq):
+def _action_done(facts, store, path, tid, fid, expect_seq, root):
     missing = []
     attempts = facts.board.attempts(tid)
     open_attempt = attempts and attempts[-1]["outcome"] == "pending"
@@ -875,6 +992,12 @@ def _action_done(facts, store, path, tid, fid, expect_seq):
         missing.append("attempt #%s 缺少回报（team-report --outcome succeeded ...）" % attempt_no)
     elif report.get("outcome") != "succeeded":
         missing.append("attempt #%s 回报 outcome=%s，不能 done" % (attempt_no, report.get("outcome")))
+    verified_files = None
+    if report is not None and report.get("outcome") == "succeeded":
+        # FIX04-followup (e)：done 绑定实际产物——先核内容漂移与范围，漂移即拒绝
+        #（ReviewBoard 的 sha 绑定使重报后的旧批准自动失效，重走 report→approve 链）。
+        verified_files = _verify_reported_files(root, tid, report, action="done 门")
+        _verify_report_scope(tid, facts.tasks[tid]["allowed_paths"], report)
     approval = None
     if not missing:
         feature = facts.features[fid]
@@ -890,6 +1013,11 @@ def _action_done(facts, store, path, tid, fid, expect_seq):
     if missing:
         raise CompanionError("任务 %s 不能 done，缺：%s" % (tid, "；".join(missing)))
     done_key = "team-task:%s:done@%s" % (tid, "seq" if expect_seq is None else expect_seq)
+    done_fact = {"attempt_no": attempt_no,
+                 "artifact_sha256": report["artifact_sha256"],
+                 "approval": approval}
+    if isinstance(verified_files, dict):
+        done_fact["file_shas"] = verified_files  # done 时复核通过的报告时 sha 集合
     specs = [
         (views.EVENT_TASK_STATUS, tid,
          {"feature_id": fid, "status": "done", "attempt_no": attempt_no},
@@ -899,9 +1027,7 @@ def _action_done(facts, store, path, tid, fid, expect_seq):
           "result": "done", "source": "team-gate",
           "detail": "任务 %s 完成（attempt #%s，artifact=%s）"
                     % (tid, attempt_no, report["artifact_sha256"]),
-          "fact": {"attempt_no": attempt_no,
-                   "artifact_sha256": report["artifact_sha256"],
-                   "approval": approval}},
+          "fact": done_fact},
          done_key + ":evidence")]
 
     def verify(conn):

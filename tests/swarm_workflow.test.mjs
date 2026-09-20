@@ -26,11 +26,23 @@ async function run(options = {}) {
     chunks: Array.from({ length: chunkCount }, (_, i) => ({ id: `chunk-${i}`, files: files.slice(i * perChunk, (i + 1) * perChunk), loc_est: 10, neighbors: [], rationale: 'fixture' })),
   };
   const calls = [], cards = [], publications = [], worldCalls = [], a2Asked = [];
+  // FIX05 大库 A2 结果构造器：ask 返回与黑板制品（续接回载经 read-report 读回）同构。
+  const a2Result = id => {
+    const chunk = map.chunks.find(c => c.id === id);
+    return {
+      meta: { chunk_id: id, author: 'A2' },
+      modules: [{ name: id, responsibility: 'fixture module', entry_files: chunk.files,
+        public_interfaces: [], depends_on: [], patterns: [], contract_path: `${board}/interfaces/${id}/module.md` }],
+      edges: [], findings: [{ id: `${id}:1`, where: `${chunk.files[0]}:1`, what: 'fixture risk', evidence: 'observed fixture line', severity: 'high', confidence: 0.8 }],
+      coverage: { files_claimed: chunk.files.length, files_analyzed: chunk.files.length, analyzed_files: [...chunk.files], gaps: [] },
+    };
+  };
   // world.run 桩：伪造真实宿主返回结构 {exitCode, stdout, stderr}。
   // 首参恒为字面量 "python3"，子命令与 JSON 输入在 args 数组里（无 shell 拼接）。
   const state = { planExit: 0, acquireExit: 0, acquireStdout: null, verifyExit: 0, reportExit: 0, mutateAcquire: null, mutateInspect: null, missingArtifacts: null, claimsWriteExit: 0, claimsPageExit: 0, claimsWritten: null,
     indexScanExit: 0, chunksWriteExit: 0, indexVerifyExit: 0, chunksPageExit: 0, g2InitExit: 0, g2MarkExit: 0, resumeRegisterExit: 0, staleAnchor: false, coverageExit: 0,
-    indexScan: null, g2: null, g2Marked: [], chunksWritten: null, coverageRecorded: null, resumeRegistered: null };
+    indexScan: null, g2: null, g2Marked: [], chunksWritten: null, coverageRecorded: null, resumeRegistered: null,
+    existingRun: false, chunkResults: null, chunksPageLoaded: [], a1PlanDoc: null, a1SummaryDoc: null };
   options.world?.(state);
   const worldRoots = payload => ({
     source_root: { input: payload.source_root, realpath: payload.source_root, lstat_kind: 'directory' },
@@ -45,12 +57,16 @@ async function run(options = {}) {
     if (argv[1] === 'plan') {
       if (state.planExit) return { exitCode: state.planExit, stdout: '', stderr: 'mock plan failure' };
       const roots = worldRoots(payload); state.mutatePlan?.(roots);
-      return { exitCode: 0, stdout: JSON.stringify({ ok: true, run_id: payload.run_id ?? 'run-001', run_root_exists: false, roots, checks: {} }), stderr: '' };
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, run_id: payload.run_id ?? 'run-001', run_root_exists: state.existingRun, roots, checks: {} }), stderr: '' };
     }
     if (argv[1] === 'acquire') {
       if (state.acquireExit) return { exitCode: state.acquireExit, stdout: '', stderr: 'mock acquire conflict' };
       if (state.acquireStdout !== null) return { exitCode: 0, stdout: state.acquireStdout, stderr: '' };
       const roots = worldRoots(payload); state.mutateAcquire?.(roots);
+      if (state.existingRun) {
+        if (payload.resume !== true) return { exitCode: 3, stdout: JSON.stringify({ ok: false, kind: 'conflict', error: 'mock existing run without resume' }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, run_id: payload.run_id, created_at: '2026-09-19T00:00:00+00:00', resumed_at: '2026-09-20T00:00:00+00:00', mode: 'adopt', roots }), stderr: '' };
+      }
       return { exitCode: 0, stdout: JSON.stringify({ ok: true, run_id: payload.run_id, created_at: '2026-09-20T00:00:00+00:00', mode: 'mkdir_exclusive', roots }), stderr: '' };
     }
     if (argv[1] === 'verify') {
@@ -65,6 +81,35 @@ async function run(options = {}) {
     }
     if (argv[1] === 'read-report') {
       if (state.reportExit) return { exitCode: state.reportExit, stdout: '', stderr: 'mock read failure' };
+      // FIX05：黑板制品读取（续接恢复/分块条目/索引 manifest）有界返回正文。
+      const chunkPlanEntry = payload.path.match(/\/index\/chunks\/(chunk-[A-Za-z0-9_-]+)\.json$/);
+      if (chunkPlanEntry) {
+        const entry = (state.chunksWritten ?? []).find(c => c.id === chunkPlanEntry[1]);
+        if (!entry) return { exitCode: 3, stdout: JSON.stringify({ ok: false, kind: 'conflict', error: 'mock missing chunk entry' }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, path: payload.path, realpath: payload.path, size: 10, sha256: 'a'.repeat(64), body: JSON.stringify(entry), publish_relpath: null }), stderr: '' };
+      }
+      const chunkResult = payload.path.match(/\/chunks\/(chunk-[A-Za-z0-9_-]+)\.json$/);
+      if (chunkResult) {
+        const r = state.chunkResults?.[chunkResult[1]] ?? a2Result(chunkResult[1]);
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, path: payload.path, realpath: payload.path, size: 10, sha256: 'a'.repeat(64), body: JSON.stringify(r), publish_relpath: null }), stderr: '' };
+      }
+      if (payload.path.endsWith('/a1-summary.json')) {
+        // 上次运行的勘察摘要黑板制品；桩未显式提供时按 A1 桩同构合成（续接恢复场景）。
+        const doc = state.a1SummaryDoc ?? (state.indexScan ? {
+          meta: map.meta, scan_status: map.scan_status,
+          scan_evidence: `index 世代 ${state.indexScan.generation}（anchor ${state.indexScan.source_anchor.slice(0, 12)}…）manifest ${state.indexScan.run_root}/index/manifest.json`,
+          languages: map.languages, loc_total: map.loc_total,
+          entry_points: map.entry_points, build_files: map.build_files, tree_summary: map.tree_summary,
+          plan: { path: `${board}/chunk-plan.json`, chunk_count: (state.chunksWritten ?? []).length, file_count_total: (state.chunksWritten ?? []).reduce((n, c) => n + c.files.length, 0), anchor: state.indexScan.source_anchor },
+        } : null);
+        if (!doc) return { exitCode: 3, stdout: JSON.stringify({ ok: false, kind: 'conflict', error: 'mock summary missing' }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, path: payload.path, realpath: payload.path, size: 10, sha256: 'a'.repeat(64), body: JSON.stringify(doc), publish_relpath: null }), stderr: '' };
+      }
+      if (payload.path.endsWith('/index/manifest.json')) {
+        if (!state.indexScan) return { exitCode: 3, stdout: JSON.stringify({ ok: false, kind: 'conflict', error: 'mock manifest missing' }), stderr: '' };
+        const m = { kind: 'index_manifest', generation: state.indexScan.generation, file_count: state.indexScan.file_count, excluded_count: state.indexScan.excluded_count, source_anchor: state.indexScan.source_anchor, root_realpath: args.target };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, path: payload.path, realpath: payload.path, size: 10, sha256: 'a'.repeat(64), body: JSON.stringify(m), publish_relpath: null }), stderr: '' };
+      }
       const inspect = { ok: true, path: payload.path, realpath: payload.path, size: 42, sha256: 'a'.repeat(64), body: '# Fixture analysis report\n', publish_relpath: `reports/${args.run_id}/report/analysis-report.md` };
       state.mutateInspect?.(inspect);
       return { exitCode: 0, stdout: JSON.stringify(inspect), stderr: '' };
@@ -93,29 +138,50 @@ async function run(options = {}) {
     }
     if (argv[1] === 'chunks-write') {
       if (state.chunksWriteExit) return { exitCode: state.chunksWriteExit, stdout: '', stderr: 'mock chunks write failure' };
-      state.chunksWritten = payload.chunks;
-      return { exitCode: 0, stdout: JSON.stringify({ ok: true, chunks_file: `${payload.run_root}/index/chunks.json`, chunk_count: payload.chunks.length, file_count_total: payload.chunks.reduce((n, c) => n + c.files.length, 0) }), stderr: '' };
+      // FIX05 双模式：有界导入（plan_file+anchor，argv 不携全量路径）与既有 argv 模式。
+      let chunks, mode;
+      if (payload.plan_file !== undefined) {
+        if (payload.plan_file !== `${payload.run_root}/chunk-plan.json`) throw new Error('mock: unexpected plan_file');
+        if (payload.anchor !== state.indexScan?.source_anchor) throw new Error('mock: plan anchor mismatch');
+        if (/\/file-\d+\.js/.test(JSON.stringify(payload))) throw new Error('mock: plan import argv carries file paths');
+        chunks = state.a1PlanDoc; mode = 'plan_import';
+      } else {
+        chunks = payload.chunks; mode = 'argv';
+      }
+      state.chunksWritten = chunks;
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, mode, chunks_dir: `${payload.run_root}/index/chunks`, chunk_count: chunks.length, file_count_total: chunks.reduce((n, c) => n + c.files.length, 0) }), stderr: '' };
     }
     if (argv[1] === 'index-verify') {
       if (state.indexVerifyExit) return { exitCode: state.indexVerifyExit, stdout: JSON.stringify({ ok: false, kind: 'conflict', error: 'mock closure broken: missing 1', missing_count: 1, missing_sample: [`${args.target}/ghost.js`], extra_count: 0, extra_sample: [], duplicate_count: 0, duplicate_sample: [] }), stderr: '' };
       return { exitCode: 0, stdout: JSON.stringify({ ok: true, generation: state.indexScan.generation, source_anchor: state.indexScan.source_anchor, file_count: state.indexScan.file_count, chunk_count: state.chunksWritten.length, covered: state.indexScan.file_count, missing_count: 0, extra_count: 0, duplicate_count: 0, missing_sample: [], extra_sample: [], duplicate_sample: [] }), stderr: '' };
     }
     if (argv[1] === 'g2-progress') {
+      // FIX05 per-chunk 完成标记桩：completed 列表=标记集合派生，无单体 chunk_order 持久化。
+      const markersDir = `${payload.run_root}/g2/${payload.generation ?? 1}`;
       if (payload.action === 'init') {
         if (state.g2InitExit) return { exitCode: state.g2InitExit, stdout: '', stderr: 'mock g2 init failure' };
         if (state.g2 && state.g2.source_anchor !== payload.source_anchor) return { exitCode: 3, stdout: JSON.stringify({ ok: false, kind: 'conflict', error: 'mock anchor conflict' }), stderr: '' };
-        state.g2 = state.g2 ?? { source_anchor: payload.source_anchor, generation: payload.generation, chunk_order: [...payload.chunk_order], completed: [] };
-        return { exitCode: 0, stdout: JSON.stringify({ ok: true, idempotent: false, checkpoint_path: `${payload.run_root}/checkpoints/g2-progress.json`, completed: state.g2.completed.length, total: state.g2.chunk_order.length }), stderr: '' };
+        if (payload.chunk_order !== undefined) throw new Error('mock: init 不再接受 chunk_order 全表');
+        const total = (state.chunksWritten ?? []).length;
+        state.g2 = state.g2 ?? { source_anchor: payload.source_anchor, generation: payload.generation, chunk_order: (state.chunksWritten ?? []).map(c => c.id), completed: [] };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, idempotent: false, markers_dir: markersDir, meta_path: `${markersDir}/meta.json`, completed: state.g2.completed.length, total }), stderr: '' };
       }
       if (payload.action === 'mark') {
         if (state.g2MarkExit) return { exitCode: state.g2MarkExit, stdout: '', stderr: 'mock g2 mark failure' };
         state.g2Marked.push(payload.chunk_id);
+        if (payload.result_path !== `${payload.run_root}/chunks/${payload.chunk_id}.json`) throw new Error('mock: mark 应绑定块结果制品');
         if (!state.g2.completed.includes(payload.chunk_id)) state.g2.completed.push(payload.chunk_id);
-        return { exitCode: 0, stdout: JSON.stringify({ ok: true, chunk_id: payload.chunk_id, idempotent: false, completed: state.g2.completed.length, total: state.g2.chunk_order.length }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, chunk_id: payload.chunk_id, idempotent: false, marker_path: `${markersDir}/${payload.chunk_id}.done`, completed: state.g2.completed.length, total: state.g2.chunk_order.length }), stderr: '' };
       }
       if (payload.action === 'read') {
-        if (!state.g2) return { exitCode: 0, stdout: JSON.stringify({ ok: true, exists: false, checkpoint_path: `${payload.run_root}/checkpoints/g2-progress.json` }), stderr: '' };
-        return { exitCode: 0, stdout: JSON.stringify({ ok: true, exists: true, checkpoint: { version: 1, kind: 'g2_progress', source_anchor: state.g2.source_anchor, generation: state.g2.generation, chunk_order: state.g2.chunk_order, completed: [...state.g2.completed] } }), stderr: '' };
+        if (!state.g2) return { exitCode: 0, stdout: JSON.stringify({ ok: true, exists: false, markers_dir: markersDir, meta_path: `${markersDir}/meta.json` }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, exists: true, markers_dir: markersDir, meta_path: `${markersDir}/meta.json`, meta: { version: 1, kind: 'g2_markers', source_anchor: state.g2.source_anchor, generation: state.g2.generation, total: state.g2.chunk_order.length }, completed_count: state.g2.completed.length, total: state.g2.chunk_order.length }), stderr: '' };
+      }
+      if (payload.action === 'list') {
+        const ids = state.g2?.completed ?? [];
+        const pages = Math.ceil(ids.length / payload.page_size);
+        if (ids.length && payload.page >= pages) return { exitCode: 2, stdout: JSON.stringify({ ok: false, kind: 'argument', error: 'mock list page overflow' }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, total: ids.length, pages, page: payload.page, page_size: payload.page_size, ids: ids.slice(payload.page * payload.page_size, (payload.page + 1) * payload.page_size) }), stderr: '' };
       }
       return { exitCode: 2, stdout: '', stderr: 'mock g2 action invalid' };
     }
@@ -129,15 +195,18 @@ async function run(options = {}) {
       return { exitCode: 0, stdout: JSON.stringify({ ok: true, kind: payload.kind, id: payload.activity_id, condition: 'ok', cursor_summary: 'cursor=1/2 status=running', resume_call: null, detail: null }), stderr: '' };
     }
     if (argv[1] === 'chunks-page') {
-      // SR-06 分块领取桩：跳过检查点已 completed 的块后按 page/page_size 切页。
+      // SR-06/FIX05 分块领取桩：跳过完成标记后的块按 page/page_size 切页；
+      // loaded_entries 记录本次实际加载的分块条目数（≤页大小，可断言）。
       if (state.chunksPageExit) return { exitCode: state.chunksPageExit, stdout: '', stderr: 'mock chunks page failure' };
       const completed = new Set(state.g2?.completed ?? []);
       const pending = (state.chunksWritten ?? []).filter(c => !completed.has(c.id));
-      if (!pending.length && payload.page === 0) return { exitCode: 0, stdout: JSON.stringify({ ok: true, total: state.chunksWritten.length, completed: completed.size, remaining: 0, pages: 0, page: 0, page_size: payload.page_size, chunks: [] }), stderr: '' };
+      if (!pending.length && payload.page === 0) return { exitCode: 0, stdout: JSON.stringify({ ok: true, total: state.chunksWritten.length, completed: completed.size, remaining: 0, pages: 0, page: 0, page_size: payload.page_size, loaded_entries: 0, chunks: [] }), stderr: '' };
       const pages = Math.ceil(pending.length / payload.page_size);
       if (payload.page >= pages) return { exitCode: 2, stdout: JSON.stringify({ ok: false, kind: 'argument', error: 'mock page overflow', pages, remaining: pending.length }), stderr: '' };
       const start = payload.page * payload.page_size;
-      return { exitCode: 0, stdout: JSON.stringify({ ok: true, total: state.chunksWritten.length, completed: completed.size, remaining: pending.length, pages, page: payload.page, page_size: payload.page_size, chunks: pending.slice(start, start + payload.page_size) }), stderr: '' };
+      const pageChunks = pending.slice(start, start + payload.page_size);
+      state.chunksPageLoaded.push(pageChunks.length);
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, total: state.chunksWritten.length, completed: completed.size, remaining: pending.length, pages, page: payload.page, page_size: payload.page_size, loaded_entries: pageChunks.length, chunks: pageChunks }), stderr: '' };
     }
     if (argv[1] === 'coverage-record') {
       if (state.coverageExit) return { exitCode: state.coverageExit, stdout: '', stderr: 'mock coverage failure' };
@@ -154,24 +223,22 @@ async function run(options = {}) {
     askCounts.set(name, attempt);
     if (name === '勘察员·罗经纬') {
       options.map?.(map);
-      // SR-06：大库（已建索引）返回摘要+分块规划（无全量 source_files/excluded），清单以索引为据。
+      // SR-06/FIX05：大库（已建索引）先把分块规划与勘察摘要"写到黑板"（桩里记录
+      // 文档供 chunks-write/续接读取），返回值只带 plan 引用——无任何 chunks[].files。
       if (state.indexScan) {
-        const summary = { meta: map.meta, scan_status: map.scan_status, languages: map.languages, loc_total: map.loc_total, entry_points: map.entry_points, build_files: map.build_files, tree_summary: map.tree_summary, chunks: map.chunks };
+        state.a1PlanDoc = map.chunks;
+        const summary = { meta: map.meta, scan_status: map.scan_status, languages: map.languages, loc_total: map.loc_total, entry_points: map.entry_points, build_files: map.build_files, tree_summary: map.tree_summary,
+          plan: { path: `${board}/chunk-plan.json`, chunk_count: map.chunks.length, file_count_total: map.chunks.reduce((n, c) => n + c.files.length, 0), anchor: state.indexScan.source_anchor } };
         summary.scan_evidence = `index 世代 ${state.indexScan.generation}（anchor ${state.indexScan.source_anchor.slice(0, 12)}…）manifest ${state.indexScan.run_root}/index/manifest.json`;
+        state.a1SummaryDoc = summary;
         return summary;
       }
       return map;
     }
     if (name.startsWith('模块深读员·')) {
-      const id = name.split('·')[1], chunk = map.chunks.find(c => c.id === id);
+      const id = name.split('·')[1];
       a2Asked.push(id);
-      const r = {
-        meta: { chunk_id: id, author: 'A2' },
-        modules: [{ name: id, responsibility: 'fixture module', entry_files: chunk.files,
-          public_interfaces: [], depends_on: [], patterns: [], contract_path: `${board}/interfaces/${id}/module.md` }],
-        edges: [], findings: [{ id: `${id}:1`, where: `${chunk.files[0]}:1`, what: 'fixture risk', evidence: 'observed fixture line', severity: 'high', confidence: 0.8 }],
-        coverage: { files_claimed: chunk.files.length, files_analyzed: chunk.files.length, analyzed_files: [...chunk.files], gaps: [] },
-      };
+      const r = a2Result(id);
       options.chunk?.(r, id, attempt); return r;
     }
     if (['架构分析员·高屋建', '依赖分析员·纲举目', '构建分析员·步就班'].includes(name)) {
@@ -552,9 +619,63 @@ test('SR-06: big repo A1 receives summary + index refs, never the full listing',
   assert(a1.prompt.includes('世代 1'), 'prompt 引用索引世代');
   assert(a1.prompt.includes('240 个源文件'), 'prompt 告知索引全集文件数（分页核对基准）');
   assert(a1.prompt.includes('bbbbbbbbbbbb'), 'prompt 携带 anchor 指纹（12 位前缀）');
+  assert(a1.prompt.includes('/reports/run-001/chunk-plan.json'), 'prompt 指定分块规划黑板路径');
+  assert(a1.prompt.includes('/reports/run-001/a1-summary.json'), 'prompt 指定勘察摘要黑板路径');
   assert(!a1.prompt.includes('source_files 完整枚举'), '不再要求返回全量清单（旧行为短语不出现）');
-  assert(!worldCalls.some(w => w[1][1] === 'index-verify' && JSON.parse(w[1][3]).chunks), '全集比对在 precheck 侧分页做，不经协调者');
-  assert.equal(result.gate_checks.some(g => g.includes('index-verify 分页核对')), true, 'G1 闸门记录分页核对');
+  assert(!worldCalls.some(w => w[1][1] === 'index-verify' && JSON.parse(w[1][3]).chunks), '全集比对在 precheck 侧流式做，不经协调者');
+  // FIX05 有界交接：协调者只经手 plan 引用——chunks-write 的 argv 是 plan_file+anchor，
+  // 不含 chunks 数组、不含任何文件全路径；门禁文本记录 plan 引用口径。
+  const write = worldCalls.find(w => w[1][1] === 'chunks-write');
+  assert(write, '分块规划经有界导入落盘');
+  const writePayload = JSON.parse(write[1][3]);
+  assert.equal(writePayload.plan_file, '/reports/run-001/chunk-plan.json');
+  assert.equal(writePayload.anchor, 'b'.repeat(64));
+  assert.equal(writePayload.chunks, undefined, 'argv 不再 stringify summary.chunks');
+  assert(!write[1][3].includes('/repos/app/file-'), '导入 argv 不含任何文件全路径');
+  assert(result.gate_checks.some(g => g.includes('index-verify 分页核对')), true, 'G1 闸门记录分页核对');
+  assert(result.gate_checks.some(g => g.includes('plan 引用')), 'G1 闸门记录有界引用口径');
+});
+
+test('SR-06: adopt resume reloads 3 finished chunks and closes 3+2=5 without re-asking A1', async () => {
+  // 中断前：chunk-0/1/2 已完成（标记+黑板结果）；续跑 adopt 同一 run_root，
+  // 复用索引世代不重扫、不重问勘察员、不重写规划，只新派发 chunk-3/4，
+  // 聚合 = 历史 3 块 + 新 2 块 = 全集 5 块（无重无漏）。
+  const { result, calls, worldCalls } = await run({ chunks: 5, bigFiles: 240, world: w => {
+    w.existingRun = true;
+    w.indexScan = { generation: 1, file_count: 240, excluded_count: 3, source_anchor: 'b'.repeat(64), run_root: '/reports/run-001' };
+    w.chunksWritten = Array.from({ length: 5 }, (_, i) => ({
+      id: `chunk-${i}`,
+      files: Array.from({ length: 48 }, (_, j) => `/repos/app/file-${i * 48 + j}.js`),
+      loc_est: 10, neighbors: [], rationale: 'fixture',
+    }));
+    w.g2 = { source_anchor: 'b'.repeat(64), generation: 1,
+      chunk_order: Array.from({ length: 5 }, (_, i) => `chunk-${i}`),
+      completed: ['chunk-0', 'chunk-1', 'chunk-2'] };
+  } });
+  assert.equal(result.status, 'complete');
+  const acquire = worldCalls.find(w => w[1][1] === 'acquire');
+  assert.equal(JSON.parse(acquire[1][3]).resume, true, 'run_root 已存在 → 显式 resume=true');
+  assert(!worldCalls.some(w => w[1][1] === 'index-scan'), '续接复用索引世代，不重扫');
+  assert(!worldCalls.some(w => w[1][1] === 'chunks-write'), '续接不重写分块规划');
+  assert(!calls.some(c => c.name === '勘察员·罗经纬'), '续接不重问勘察员（规划原文在黑板）');
+  assert(result.gate_checks.some(g => g.includes('续接复用既有索引世代 1')));
+  assert(result.gate_checks.some(g => g.includes('续接回载 3 块历史结果 + 新派发 2 块')), '门禁记录 3+2 闭合口径');
+  // 派发：只有剩余 chunk-3/4 被新问；历史 3 块经黑板制品逐块回载重校验。
+  const asked = calls.filter(c => c.name.startsWith('模块深读员·')).map(c => c.name.split('·')[1]);
+  assert.deepEqual(asked, ['chunk-3', 'chunk-4']);
+  const a2AsksBeforeDispatch = worldCalls.filter(w => w[1][1] === 'g2-progress' && /"action":"mark"/.test(w[1][3]));
+  assert.deepEqual(a2AsksBeforeDispatch.map(w => JSON.parse(w[1][3]).chunk_id), ['chunk-3', 'chunk-4'], '只标记新完成块');
+  const g2Mark = worldCalls.find(w => w[1][1] === 'g2-progress' && /"action":"mark"/.test(w[1][3]));
+  assert(JSON.parse(g2Mark[1][3]).result_path.endsWith('/chunks/chunk-3.json'), '标记绑定块结果制品');
+  // 聚合闭合：5 块发现全部在场（历史 3 块的 finding 也进汇总与送验），无重无漏。
+  const findingIds = result.findings.map(f => f.id);
+  assert.deepEqual(findingIds, ['chunk-0:1', 'chunk-1:1', 'chunk-2:1', 'chunk-3:1', 'chunk-4:1']);
+  assert.ok(result.findings.every(f => f.status === 'verified'), '回载历史结果同样进入送验闭合');
+  assert.equal(result.coverage.chunks, 5);
+  assert.equal(result.coverage.files, 240);
+  assert.equal(result.coverage.files_analyzed, 240, '历史+新结果的逐文件覆盖合计 = 全集');
+  assert.equal(result.coverage.verdicts, 9, '送验 = 3 专项 + 1 入口 + 5 发现');
+  assert.equal(result.coverage.confirmed, 9);
 });
 
 test('SR-06: big repo G2 pages chunks in bounded batches of 3 with checkpoint marks', async () => {
@@ -578,7 +699,11 @@ test('SR-06: big repo G2 pages chunks in bounded batches of 3 with checkpoint ma
   const first = a2.find(c => c.name === '模块深读员·chunk-0');
   assert(first.prompt.includes('file-0.'), '本块文件在载荷中');
   assert(!first.prompt.includes('file-100.'), '其他块文件不得进入本块载荷');
-  // 检查点：逐块成功即 mark，order 与全集一致
+  // FIX05 真分页：每次领取实际加载的分块条目 ≤ 页大小（计数桩）
+  assert.deepEqual(state.chunksPageLoaded, [3, 3, 1], '领取加载量 = 页大小有界');
+  // 完成标记：逐块成功即 mark（绑定结果制品路径），order 与全集一致
+  const g2Init = worldCalls.find(w => w[1][1] === 'g2-progress' && /"action":"init"/.test(w[1][3]));
+  assert.equal(JSON.parse(g2Init[1][3]).chunk_order, undefined, 'init 不再持久化 chunk_order 全表');
   assert.deepEqual(state.g2Marked.slice().sort(), Array.from({ length: 7 }, (_, i) => `chunk-${i}`).sort());
   assert.equal(state.resumeRegistered.source_anchor, 'b'.repeat(64));
   assert.equal(state.resumeRegistered.kind, 'custom');
@@ -588,14 +713,22 @@ test('SR-06: big repo G2 pages chunks in bounded batches of 3 with checkpoint ma
 
 test('SR-06: chunks-page skips checkpointed chunks on re-entry', async () => {
   const anchor = 'b'.repeat(64);
-  const { result, calls } = await run({ chunks: 7, bigFiles: 240, world: w => {
-    // 预置检查点：chunk-0 已在上次执行完成（重入续跑场景）
+  const { result, calls, worldCalls } = await run({ chunks: 7, bigFiles: 240, world: w => {
+    // 预置完成标记：chunk-0 已在上次执行完成（重入续跑场景）
     w.g2 = { source_anchor: anchor, generation: 1, chunk_order: Array.from({ length: 7 }, (_, i) => `chunk-${i}`), completed: ['chunk-0'] };
   } });
   assert.equal(result.status, 'complete');
   const a2 = calls.filter(c => c.name.startsWith('模块深读员·'));
   assert.equal(a2.length, 6, '已完成块被跳过，只派发剩余 6 块');
   assert(!calls.some(c => c.name === '模块深读员·chunk-0'), 'chunk-0 不再重问');
+  // FIX05 续接回载：chunk-0 的历史结果从黑板制品逐块读回（read-report），重过 G2 校验。
+  const reloaded = worldCalls.filter(w => w[1][1] === 'read-report' && w[1][3].includes('/chunks/chunk-0.json'));
+  assert(reloaded.some(w => JSON.parse(w[1][3]).path === '/reports/run-001/chunks/chunk-0.json'), '历史块结果经 read-report 有界回载');
+  assert(result.coverage.chunks, 7);
+  assert(result.gate_checks.some(g => g.includes('续接回载 1 块历史结果 + 新派发 6 块')));
+  // 台账登记绑定标记元数据（resume-check 的检查点是 meta.json，恒为可读 JSON）
+  const register = worldCalls.find(w => w[1][1] === 'resume-register');
+  assert.equal(JSON.parse(register[1][3]).checkpoint_path, '/reports/run-001/g2/1/meta.json');
 });
 
 test('SR-06: stale anchor refuses mixed-generation resume', async () => {
