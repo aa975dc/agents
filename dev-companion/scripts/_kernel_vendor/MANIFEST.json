@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
-  "generated_at": "2026-09-20T08:40:18+00:00",
+  "generated_at": "2026-09-20T09:01:38+00:00",
   "source": {
     "path": "packages/agents_kernel",
-    "commit": "3e118121f3c74bc57a8e5972a0ef3430d1552171"
+    "commit": "f100a1ec8a36bcd5b28a9438232573f6b816a252"
   },
   "target": {
     "plugin": "dev-companion",
@@ -122,8 +122,8 @@
     },
     {
       "path": "agents_kernel/presentation/status_view.py",
-      "sha256": "237b34ca644f54d2373cfcd3622dc6d50fafb30a587e7f260bf1948f109ac609",
-      "bytes": 3122
+      "sha256": "2e3e8dd8d1de0dbc0c3a5ae7ee09de226e41664d0b268055cc9fad109356487e",
+      "bytes": 5141
     },
     {
       "path": "agents_kernel/process.py",
@@ -144,6 +144,11 @@
       "path": "agents_kernel/services/coverage.py",
       "sha256": "856e73bf84c6d40c52aa18b6aa48012ff79df1df9ecdc7418b2ae85c47e0f14b",
       "bytes": 4030
+    },
+    {
+      "path": "agents_kernel/services/evidence_freshness.py",
+      "sha256": "6ad5de5275af0ccd0d9202694d65f37ca78abee5fc311b29226c474a2c828c92",
+      "bytes": 6422
     },
     {
       "path": "agents_kernel/services/request_cache.py",
