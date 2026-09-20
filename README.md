@@ -8,8 +8,8 @@ A collection of ZCode agents and plugins: **code-analysis-swarm** (a read-only c
 
 | 插件 Plugin | 版本 Version | 定位 Positioning |
 |---|---|---|
-| [code-analysis-swarm](#code-analysis-swarm--代码分析智能团) | 0.2.1 | 只读多智能体"全面体检"：结构、架构、依赖、构建，产出带 `file:line` 证据和覆盖声明的报告 |
-| [dev-companion](#dev-companion--新手开发陪伴) | 0.2.0 | 从一句模糊想法到发布验证的完整生命周期：白话规划 → 串行开发 → 真实联调 → 独立验收 → 发布核验 → 本地快照 |
+| [code-analysis-swarm](#code-analysis-swarm--代码分析智能团) | 0.3.0 | 只读多智能体"全面体检"：结构、架构、依赖、构建，产出带 `file:line` 证据和覆盖声明的报告 |
+| [dev-companion](#dev-companion--新手开发陪伴) | 0.3.0 | 从一句模糊想法到发布验证的完整生命周期：白话规划 → 串行开发 → 真实联调 → 独立验收 → 发布核验 → 本地快照 |
 
 ## 中文
 
@@ -19,14 +19,14 @@ A collection of ZCode agents and plugins: **code-analysis-swarm** (a read-only c
 
 1. 准备本仓库的本地副本，确认仓库根目录有 `marketplace.json`。
 2. 在 ZCode「插件市场 → 添加插件市场」选择该仓库根目录（不同宿主版本入口文字略有差异）。
-3. 在该市场安装 `dev-companion` `0.2.0` 和 / 或 `code-analysis-swarm` `0.2.1`。已有安装先刷新市场，在插件详情里更新；**修改源码不会自动更新安装副本**。
+3. 在该市场安装 `dev-companion` `0.3.0` 和 / 或 `code-analysis-swarm` `0.3.0`。已有安装先刷新市场，在插件详情里更新；**修改源码不会自动更新安装副本**。
 4. 新建任务，在 `/` 菜单选择 `companion-start`（开发陪伴）或 `swarm-analyze`（代码分析）。
 
 dev-companion 需要 Python 3.9+（仅标准库，无第三方依赖）和 ZCode 的文件 / 进程执行 / Agent 能力。没有必装 MCP、Hook、云服务或后台监控。`resume` 是 ZCode 内置命令，故插件入口统一以 `companion-` 前缀命名；用户自己的同名命令优先于插件命令。
 
 ---
 
-### Dev Companion 0.2.0 · 新手开发陪伴
+### Dev Companion 0.3.0 · 新手开发陪伴
 
 从一句模糊想法开始，用白话讲清产品，经过问答、产品方案、流程、原型和技术设计，再完成编码、联调、测试修复与发布验证。每一步保存成果、决定和未决问题，下次打开可以继续。详细说明见 [插件 README](dev-companion/README.md)。
 
@@ -190,11 +190,11 @@ stateDiagram-v2
 
 #### 实施与验证状态（2026-09-20）
 
-已验证：Python 主测试 **564 通过**（另 5 项 L_TIER 长跑基准门在常规 discover 中 skip）、最小示例 **4/4**、Node **57/57**（工作流 54 + 宿主契约 3，模拟宿主）；0.2.0 里程碑 trace 覆盖 core 94% / journey 100% / releases 99% / archives 89%（见实施记录）；L 档 10 万条目基准实测见 [L 档验收](docs/verification/l-tier-acceptance-2026-09-20.md)；23 步隔离项目演示到 `local_verified`，代理浏览器核验部署副本；真实派发 `companion-developer` 修复 + `companion-checker` 独立检查在桌面环境通过。尚未验证：**真实用户的需求问答、原型体验与软件试用**；正式远程部署（示例本地发布不代表任意云平台已适配）。细节见 [生命周期实施记录](docs/dev-companion-lifecycle.md) 与 [阶段验证记录](docs/verification/)；旧版本历史见 [既有评审](docs/dev-companion-review.md)。
+已验证：Python 主测试 **611 通过**（另 5 项 L_TIER 长跑基准门在常规 discover 中 skip）、最小示例 **4/4**、Node **57/57**（工作流 54 + 宿主契约 3，模拟宿主）；0.2.0 里程碑 trace 覆盖 core 94% / journey 100% / releases 99% / archives 89%（见实施记录）；L 档 10 万条目基准实测见 [L 档验收](docs/verification/l-tier-acceptance-2026-09-20.md)；23 步隔离项目演示到 `local_verified`，代理浏览器核验部署副本；真实派发 `companion-developer` 修复 + `companion-checker` 独立检查在桌面环境通过。尚未验证：**真实用户的需求问答、原型体验与软件试用**；正式远程部署（示例本地发布不代表任意云平台已适配）。细节见 [生命周期实施记录](docs/dev-companion-lifecycle.md) 与 [阶段验证记录](docs/verification/)；旧版本历史见 [既有评审](docs/dev-companion-review.md)。
 
 ---
 
-### code-analysis-swarm 0.2.1 · 代码分析智能团
+### code-analysis-swarm 0.3.0 · 代码分析智能团
 
 对目标软件做**全面体检**的只读多智能体体系：代码结构、模块划分、整体架构、依赖关系、构建流程。产出带证据（`file:line`）的中文分析报告。完整设计见 [`code-analysis-swarm/DESIGN.md`](code-analysis-swarm/DESIGN.md)。
 
@@ -335,7 +335,7 @@ flowchart TD
 ```
 agents/
 ├── marketplace.json                    # ZCode 插件市场清单（仓库根即市场根）
-├── code-analysis-swarm/                # 插件：只读代码分析智能团 0.2.1
+├── code-analysis-swarm/                # 插件：只读代码分析智能团 0.3.0
 │   ├── .zcode-plugin/plugin.json       # commands 字段显式声明目录名 command/（单数，合法自定义）
 │   ├── README.md                       # 插件视角简明说明（安装 / 组件 / 命令 / 测试）
 │   ├── DESIGN.md                       # 完整设计（角色 / 闸门 / 契约 / 报告结构）
@@ -343,7 +343,7 @@ agents/
 │   ├── command/swarm-analyze.md        # /swarm-analyze 入口（C0 操作手册）
 │   ├── scripts/precheck.py             # 预检与制品核验 helper（标准库，工作流经固定 argv 调用）
 │   └── workflow/code-analysis.dwf.ts   # 可选动态工作流
-├── dev-companion/                      # 插件：新手开发陪伴 0.2.0
+├── dev-companion/                      # 插件：新手开发陪伴 0.3.0
 │   ├── .zcode-plugin/plugin.json
 │   ├── README.md                       # 新手使用说明
 │   ├── commands/                       # 七个 companion-* 聊天入口（目录名为 manifest 显式声明）
@@ -377,7 +377,7 @@ python3 tools/build_vendor.py
 
 L 档（10 万条目）容量基准不进常规回归，手动运行：`L_TIER=1 python3 -m unittest tests.benchmarks.test_l_tier -v`。
 
-Python 测试覆盖规划草案与失效、状态、完成度、接口检查、发布证据、范围变更、文件快照与恢复故障，另含共享内核（索引、分片、覆盖账、恢复）与团队编排回归。Node 测试需要 Node 24，执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回；它不替代真实 ZCode 动态工作流验收。
+Python 测试覆盖规划草案与失效、状态、完成度、接口检查、发布证据、范围变更、文件快照与恢复故障，另含共享内核（索引、分片、覆盖账、恢复）与团队编排回归。Node 测试要求 Node ≥22.13（`stripTypeScriptTypes` 门槛），CI 矩阵为 22+24，已验证版本 24；它执行 TypeScript 工作流的真实编排逻辑并模拟宿主返回，不替代真实 ZCode 动态工作流验收。
 
 ### 文档索引
 
@@ -402,14 +402,14 @@ This repository is a ZCode plugin marketplace (the repo root contains `marketpla
 
 1. Prepare a local copy of this repository and make sure the repo root contains `marketplace.json`.
 2. In ZCode's "Plugin Marketplace → Add marketplace", pick this repository root (wording may differ between host versions).
-3. Install `dev-companion` `0.2.0` and/or `code-analysis-swarm` `0.2.1` from that marketplace. For existing installs, refresh the marketplace and update from the plugin detail page; **editing the source does not auto-update the installed copy**.
+3. Install `dev-companion` `0.3.0` and/or `code-analysis-swarm` `0.3.0` from that marketplace. For existing installs, refresh the marketplace and update from the plugin detail page; **editing the source does not auto-update the installed copy**.
 4. Start a new task and pick `companion-start` (development companion) or `swarm-analyze` (code analysis) from the `/` menu.
 
 dev-companion requires Python 3.9+ (standard library only, no third-party packages) and ZCode's file / process-execution / Agent capabilities. There is no required MCP, hook, cloud service, or background monitoring. `resume` is a built-in ZCode command, so plugin entries use the `companion-` prefix; the user's own commands with the same name take precedence over plugin commands.
 
 ---
 
-### Dev Companion 0.2.0 · Beginner Development Companion
+### Dev Companion 0.3.0 · Beginner Development Companion
 
 Start from one vague sentence, explain the product in plain language, go through Q&A, the product plan, flows, a prototype and the technical design, then finish coding, integration, test-and-fix and release verification. Every step saves its results, decisions and open questions so you can continue next time. See the [plugin README](dev-companion/README.md) for details.
 
@@ -573,11 +573,11 @@ Only **explicitly managed** ordinary files are protected (≤20 MiB per file, �
 
 #### Implementation & verification status (2026-09-20)
 
-Verified: Python main suite **564 passed** (5 more L_TIER long-run benchmark gates skip in a normal discover), minimal demo **4/4**, Node **57/57** (workflow 54 + host contract 3, mock host); 0.2.0-milestone trace coverage core 94% / journey 100% / releases 99% / archives 89% (see the implementation record); the L-tier 100k-entry benchmark has been physically measured ([L-tier acceptance](docs/verification/l-tier-acceptance-2026-09-20.md)); the 23-step isolated demo reached `local_verified` with the deployed copy checked by an agent browser; real dispatch of `companion-developer` + independent `companion-checker` passed on desktop. Not yet verified: **a real user's requirement Q&A, prototype experience and software trial**; a real remote deployment (the example's local release does not mean any cloud platform is adapted). Details: [lifecycle implementation record](docs/dev-companion-lifecycle.md) and [per-phase verification records](docs/verification/); the old version's history: [previous review](docs/dev-companion-review.md).
+Verified: Python main suite **611 passed** (5 more L_TIER long-run benchmark gates skip in a normal discover), minimal demo **4/4**, Node **57/57** (workflow 54 + host contract 3, mock host); 0.2.0-milestone trace coverage core 94% / journey 100% / releases 99% / archives 89% (see the implementation record); the L-tier 100k-entry benchmark has been physically measured ([L-tier acceptance](docs/verification/l-tier-acceptance-2026-09-20.md)); the 23-step isolated demo reached `local_verified` with the deployed copy checked by an agent browser; real dispatch of `companion-developer` + independent `companion-checker` passed on desktop. Not yet verified: **a real user's requirement Q&A, prototype experience and software trial**; a real remote deployment (the example's local release does not mean any cloud platform is adapted). Details: [lifecycle implementation record](docs/dev-companion-lifecycle.md) and [per-phase verification records](docs/verification/); the old version's history: [previous review](docs/dev-companion-review.md).
 
 ---
 
-### code-analysis-swarm 0.2.1 · Code Analysis Swarm
+### code-analysis-swarm 0.3.0 · Code Analysis Swarm
 
 A read-only multi-agent system that gives target software a **full checkup**: code structure, module division, overall architecture, dependency relations, build process. It produces Chinese-language analysis reports backed by `file:line` evidence. Full design: [`code-analysis-swarm/DESIGN.md`](code-analysis-swarm/DESIGN.md).
 
@@ -718,7 +718,7 @@ The dynamic workflow `workflow/code-analysis.dwf.ts` is an **optional** path (pa
 ```
 agents/
 ├── marketplace.json                    # ZCode plugin marketplace manifest (repo root = marketplace root)
-├── code-analysis-swarm/                # Plugin: read-only code analysis swarm 0.2.1
+├── code-analysis-swarm/                # Plugin: read-only code analysis swarm 0.3.0
 │   ├── .zcode-plugin/plugin.json       # its commands field explicitly declares the singular command/ dir
 │   ├── README.md                       # Plugin-level quick guide (install / components / commands / tests)
 │   ├── DESIGN.md                       # Full design (roles / gates / contracts / report structure)
@@ -726,7 +726,7 @@ agents/
 │   ├── command/swarm-analyze.md        # /swarm-analyze entry (C0 operation manual)
 │   ├── scripts/precheck.py             # precheck & artifact verification helper (stdlib, fixed argv)
 │   └── workflow/code-analysis.dwf.ts   # Optional dynamic workflow
-├── dev-companion/                      # Plugin: beginner development companion 0.2.0
+├── dev-companion/                      # Plugin: beginner development companion 0.3.0
 │   ├── .zcode-plugin/plugin.json
 │   ├── README.md                       # Beginner guide
 │   ├── commands/                       # Seven companion-* chat entries (dir name declared in the manifest)
@@ -760,7 +760,7 @@ python3 tools/build_vendor.py
 
 The L-tier (100k-entry) capacity benchmark stays out of the normal regression; run it manually with `L_TIER=1 python3 -m unittest tests.benchmarks.test_l_tier -v`.
 
-The Python tests cover planning drafts and invalidation, status, completion, interface checks, release evidence, scope changes, file snapshots, and restore failures, plus shared-kernel (indexing, sharding, coverage ledger, recovery) and team-orchestration regression. The Node test requires Node 24 and executes the real orchestration logic of the TypeScript workflow with simulated host returns; it does not replace real ZCode dynamic-workflow acceptance.
+The Python tests cover planning drafts and invalidation, status, completion, interface checks, release evidence, scope changes, file snapshots, and restore failures, plus shared-kernel (indexing, sharding, coverage ledger, recovery) and team-orchestration regression. The Node tests require Node >= 22.13 (`stripTypeScriptTypes` gate); the CI matrix is 22+24 with 24 as the verified version. They execute the real orchestration logic of the TypeScript workflow with simulated host returns and do not replace real ZCode dynamic-workflow acceptance.
 
 ### Documentation index
 

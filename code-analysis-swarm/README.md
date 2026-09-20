@@ -6,7 +6,7 @@
 
 1. 准备仓库本地副本，确认仓库根目录有 `marketplace.json`。
 2. 在 ZCode「插件市场 → 添加插件市场」选择该仓库根目录（不同宿主版本入口文字略有差异）。
-3. 在该市场安装 `code-analysis-swarm` `0.2.1`（可与 `dev-companion` 共存，互不依赖；修改源码不会自动更新安装副本）。
+3. 在该市场安装 `code-analysis-swarm` `0.3.0`（可与 `dev-companion` 共存，互不依赖；修改源码不会自动更新安装副本）。
 4. 新建任务，输入 `/swarm-analyze <目标仓库绝对路径> [分析意图]`。
 
 需要 ZCode 的文件读取与 Agent 能力；对目标仓库**零写操作**，构建默认静态分析（未执行 ≠ 构建通过）。不需要 MCP、Hook 或云服务。
@@ -34,7 +34,7 @@
 
 ## 测试
 
-从仓库根运行（工作流测试以模拟宿主验证分派与结构拒绝逻辑，不替代真实宿主验收；需要 Node 24）：
+从仓库根运行（工作流测试以模拟宿主验证分派与结构拒绝逻辑，不替代真实宿主验收；需要 Node ≥22.13，CI 矩阵 22+24，已验证版本 24）：
 
 ```sh
 node --test tests/swarm_workflow.test.mjs tests/host/host-contract.test.mjs   # 54 + 3 项

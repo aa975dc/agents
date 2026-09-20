@@ -453,7 +453,7 @@ test('artifact failure cannot repair or publish an unvalidated arbitrary path', 
 
 test('ZCode plugin manifest and all seven agents expose documented metadata', () => {
   const manifest = JSON.parse(readFileSync(new URL('.zcode-plugin/plugin.json', root), 'utf8'));
-  assert.equal(manifest.name, 'code-analysis-swarm'); assert.equal(manifest.version, '0.2.1');
+  assert.equal(manifest.name, 'code-analysis-swarm'); assert.equal(manifest.version, '0.3.0');
   assert.equal(manifest.commands, 'command'); assert.equal(manifest.agents, 'agents');
   assert.deepEqual(readdirSync(new URL('command/', root)), ['swarm-analyze.md']);
   assert.match(readFileSync(new URL('command/swarm-analyze.md', root), 'utf8'), /# \/swarm-analyze/);

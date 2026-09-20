@@ -4,14 +4,14 @@
   "plugins": [
     {
       "name": "code-analysis-swarm",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "source": "./code-analysis-swarm",
       "description": "保留证据和覆盖声明的只读代码体检",
       "category": "developer-tools"
     },
     {
       "name": "dev-companion",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "source": "./dev-companion",
       "description": "产品规划、开发联调、真实验收、发布核验与本地文件存档",
       "category": "developer-tools"
