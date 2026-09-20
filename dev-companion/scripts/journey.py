@@ -27,6 +27,7 @@ _kernel_path()
 from agents_kernel.atomicio import read_json, write_json
 from agents_kernel.digest import content_digest, digest, sha256_bytes
 from agents_kernel.process import now
+from agents_kernel.services.request_cache import RequestCache
 from agents_kernel.validation import (CompanionError, feature_id, relative_path, safe_file, strings, text,
                                       validate_scope)
 
@@ -242,10 +243,18 @@ class Journey:
                 "next_step": NEXT_STEPS[current_stage]}
 
     def status(self):
+        # Z13：请求作用域内同一 journey.json 只解析+产物重哈希一次；作用域外永远现读
+        # （save/require_ready 等写路径与命令级读取不进作用域，见 services/request_cache.py）。
+        return RequestCache.get(("journey-status", str(self.path)), self._status_uncached)
+
+    def _status_uncached(self):
         state = self._load()
         return self._view(state) if state else None
 
     def context(self):
+        return RequestCache.get(("journey-context", str(self.path)), self._context_uncached)
+
+    def _context_uncached(self):
         status = self.status()
         if status is None:
             return None

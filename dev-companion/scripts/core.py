@@ -37,10 +37,15 @@ from agents_kernel.atomicio import read_json, write_json
 from agents_kernel.digest import content_digest, digest, sha256_file
 from agents_kernel.paths import EXCLUDED_DIRS, realpath, sensitive
 from agents_kernel.process import now, redact_output, run_argv
+from agents_kernel.services.request_cache import RequestCache
 from agents_kernel.validation import (CompanionError, relative_path, safe_file, strings, text,
                                       validate_scope)
 
 from archives import ArchiveError, pending_restore
+
+
+class CapacityExceeded(CompanionError):
+    """项目超出当前扫描容量上限（Z21 前半）：状态可降级展示，写路径仍硬拒绝。"""
 
 
 class Project:
@@ -166,6 +171,11 @@ class Project:
         write_json(self.state_path, state, prefix="state-", suffix=".tmp")
 
     def snapshot(self):
+        # Z13：请求作用域内同项目只扫一次；作用域外（packet/check/accept 等写路径）每次现算，
+        # check 的前后快照对比不受缓存影响。
+        return RequestCache.get(("project-snapshot", str(self.root)), self._scan_snapshot)
+
+    def _scan_snapshot(self):
         files, excluded, total = {}, [], 0
         for directory, dirs, names in os.walk(self.root, followlinks=False):
             parent = Path(directory)
@@ -189,7 +199,7 @@ class Project:
                 info = path.stat()
                 total += info.st_size
                 if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
-                    raise CompanionError("项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）")
+                    raise CapacityExceeded("项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）")
                 sha256_hex, size = sha256_file(path)
                 after = path.stat()
                 if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or size != info.st_size:
@@ -453,6 +463,12 @@ class Project:
                     "message": "已记录阻塞；此命令不会替你终止外部智能体，请确认实际写入已停止"}
 
     def status(self, include_release=True, snapshot=None):
+        # Z13：本命令是只读的，作用域内 Journey 三次解析/产物重哈希与快照复用为一次；
+        # 写命令不经此路径（作用域外一切照旧，行为等价）。跨进程缓存明确不做。
+        with RequestCache.with_scope():
+            return self._status(include_release, snapshot)
+
+    def _status(self, include_release, snapshot):
         from journey import Journey
         orphan = self.orphan_release_note()
         if orphan:
@@ -468,7 +484,11 @@ class Project:
             return self.decorate_status(view, planning, include_release)
         state = self.load()
         recovery = self.recovery_status()
-        snapshot = snapshot or self.snapshot()
+        try:
+            snapshot = snapshot or self.snapshot()
+        except CapacityExceeded as exc:
+            # Z21 前半：快照超限时状态不再整体抛错，改走"索引未建"降级视图。
+            return self._status_capacity_paused(state, planning, exc)
         planning_fingerprint = self.planning_fingerprint()
         features, counts = [], {s: 0 for s in ("pending", "running", "awaiting_review", "accepted", "blocked")}
         for feature in state["scope"]["features"]:
@@ -511,6 +531,39 @@ class Project:
                 "recovery": recovery,
                 "publication": "未核验发布状态", "history": state["events"][-10:]}
         return self.decorate_status(view, planning, include_release)
+
+    def _status_capacity_paused(self, state, planning, exc):
+        # Z21 前半：超限项目的降级视图——项目名/任务状态来自本地台账（不扫源码树），
+        # 指纹相关字段显式 unavailable，绝不冒充最新；沿用现有 stale 语义：
+        # 无法核验的已验收不算仍通过（unknown/stale 不变 accepted）。
+        # 07_STORAGE §5：只读展示降级不代表安全门降级——验收/发布核验一并关闭。
+        counts = {s: 0 for s in ("pending", "running", "awaiting_review", "accepted", "blocked")}
+        features = []
+        for feature in state["scope"]["features"]:
+            task = state["tasks"][feature["id"]]
+            status = "awaiting_review" if task["status"] == "accepted" else task["status"]
+            counts[status] += 1
+            features.append({**feature, "status": status, "evidence_stale": "verification" in task,
+                             "blocker": task.get("blocker") or task.get("receipt", {}).get("blocker"),
+                             "verification": task.get("verification"), "integration": task.get("integration"),
+                             "integration_stale": not task.get("integration", {}).get("passed"),
+                             "feedback": task.get("feedback", []), "acceptance": task.get("acceptance")})
+        total = len(features)
+        view = {"schema_version": 1, "title": state["scope"]["title"], "goal": state["scope"]["goal"],
+                "scope": state["scope"], "revision": state["revision"], "scope_version": state["scope_version"],
+                "confirmed": state["confirmed"], "updated_at": state["updated_at"], "observed_at": now(),
+                "counts": counts, "total": total, "overall_percent": None,
+                "next_step": "", "features": features, "excluded_paths": [],
+                "source_fingerprint": None, "fingerprint_status": "unavailable",
+                "capacity_status": "paused", "capacity_message": str(exc),
+                "recovery": self.recovery_status(),
+                "publication": "项目超出当前检查上限；发布核验暂停，建立索引后才能核验",
+                "release": None, "history": state["events"][-10:]}
+        view = self.decorate_status(view, planning, include_release=False)
+        if not view.get("recovery"):
+            view["next_step"] = ("项目文件超出当前检查上限（单文件20MiB，总量100MiB，10000文件）；"
+                                 "进度与验收核验已暂停，请先为项目建立文件索引或减小规模后重试")
+        return view
 
     def decorate_status(self, view, planning, include_release):
         release = None
@@ -559,13 +612,19 @@ RELEASE_LABELS["interrupted"] = "已记录中断现场；发布结果仍未核�
 def render_markdown(view):
     def cell(value):
         return str(value).replace("|", "\\|").replace("\n", " ")
-    progress = ("恢复未完成，暂不能计算" if view.get("recovery") else "范围待确认，暂不能计算") if view["overall_percent"] is None else "%s/%s 项已验收（%s%%）" % (
-        view["counts"]["accepted"], view["total"], view["overall_percent"])
+    unavailable = view.get("fingerprint_status") == "unavailable"
+    if view["overall_percent"] is not None:
+        progress = "%s/%s 项已验收（%s%%）" % (view["counts"]["accepted"], view["total"], view["overall_percent"])
+    else:
+        progress = ("恢复未完成，暂不能计算" if view.get("recovery")
+                    else "索引未建，暂不能核验" if unavailable else "范围待确认，暂不能计算")
     lines = ["# " + cell(view["title"]), "", cell(view["goal"]), "", "**本版完成度：** " + progress,
              "**当前阶段：** " + view.get("stage_label", "编码实现"),
              "**推荐下一步：** " + view["next_step"], "", "| 功能 | 状态 | 提醒 |", "|---|---|---|"]
     for feature in view["features"]:
-        notice = feature.get("blocker") or ("内容已变化，需要复查" if feature["evidence_stale"] else "")
+        notice = feature.get("blocker") or ""
+        if not notice and feature["evidence_stale"]:
+            notice = "无法核验当前内容（索引未建），需要复查" if unavailable else "内容已变化，需要复查"
         lines.append("| %s | %s | %s |" % (cell(feature["title"]), LABELS[feature["status"]], cell(notice)))
     lines += ["", "**首版不包含：** " + ("；".join(map(cell, view["scope"]["out_of_scope"])) or "尚未列出"),
               "**假设与待确认：** " + ("；".join(map(cell, view["scope"]["assumptions"])) or "当前未列出"),
@@ -579,12 +638,18 @@ def render_markdown(view):
 
 def render_html(view):
     esc = lambda value: html.escape(str(value), quote=True)
-    progress = ("恢复未完成" if view.get("recovery") else "范围待确认") if view["overall_percent"] is None else "%s / %s 项已验收" % (view["counts"]["accepted"], view["total"])
+    unavailable = view.get("fingerprint_status") == "unavailable"
+    if view["overall_percent"] is not None:
+        progress = "%s / %s 项已验收" % (view["counts"]["accepted"], view["total"])
+    else:
+        progress = "恢复未完成" if view.get("recovery") else ("索引未建，暂不能核验" if unavailable else "范围待确认")
     cards = []
     for f in view["features"]:
-        notes = f.get("blocker") or ("内容已变化，需要复查" if f["evidence_stale"] else "")
+        notice = f.get("blocker") or ""
+        if not notice and f["evidence_stale"]:
+            notice = "无法核验当前内容（索引未建），需要复查" if unavailable else "内容已变化，需要复查"
         cards.append('<article><span class="badge %s">%s</span><h3>%s</h3><p>%s</p><details><summary>怎样算完成</summary><ul>%s</ul></details></article>' % (
-            f["status"], LABELS[f["status"]], esc(f["title"]), esc(notes),
+            f["status"], LABELS[f["status"]], esc(f["title"]), esc(notice),
             "".join("<li>%s</li>" % esc(c) for c in f["acceptance_criteria"])))
     return '''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s · 开发陪伴</title><style>
@@ -592,10 +657,10 @@ def render_html(view):
 @media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#161a21;--text:#e8eaed;--muted:#abb6c7;--line:#3a4356;--blue:#85b7eb}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 system-ui,sans-serif}main{max-width:980px;margin:auto;padding:40px 24px}h1{font-size:32px;margin:12px 0}h2{font-size:24px}p{color:var(--muted)}.eyebrow{color:var(--blue);letter-spacing:.08em}.summary,article{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}.summary{margin:24px 0;border-left:5px solid var(--blue)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.badge{display:inline-block;border:1px solid var(--line);padding:2px 10px;border-radius:20px;font-size:14px}.accepted{color:#3b7a28}.blocked{color:#b35428}summary{cursor:pointer;color:var(--blue)}footer{margin-top:28px;color:var(--muted);font-size:14px}ul{padding-left:24px}</style>
 <main><div class="eyebrow">DEV COMPANION / 开发陪伴</div><h1>%s</h1><p>%s</p>
-<section class="summary"><h2>%s</h2><p>当前阶段：%s</p><strong>下一步：%s</strong><p>这是本次读取的状态快照。重新运行进度命令可刷新；存档、验收与发布分别记录。</p></section>
+<section class="summary"><h2>%s</h2><p>生成时间：%s（board.html 是静态产物，以生成时的项目状态为准；重新运行进度命令可刷新）</p><p>当前阶段：%s</p><strong>下一步：%s</strong><p>这是本次读取的状态快照。重新运行进度命令可刷新；存档、验收与发布分别记录。</p></section>
 <div class="grid">%s</div><section><h2>本版范围</h2><p>暂不包含：%s</p><p>假设与待确认：%s</p></section>
 <footer>范围版本 %s · 记录更新 %s · 本次读取 %s<br>发布状态：%s</footer></main></html>''' % (
-        esc(view["title"]), esc(view["title"]), esc(view["goal"]), esc(progress), esc(view.get("stage_label", "编码实现")), esc(view["next_step"]),
+        esc(view["title"]), esc(view["title"]), esc(view["goal"]), esc(progress), esc(view["observed_at"]), esc(view.get("stage_label", "编码实现")), esc(view["next_step"]),
         "".join(cards), esc("；".join(view["scope"]["out_of_scope"]) or "尚未列出"),
         esc("；".join(view["scope"]["assumptions"]) or "当前未列出"), view["scope_version"],
         esc(view["updated_at"]), esc(view["observed_at"]), esc(view["publication"]))
