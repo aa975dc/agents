@@ -30,6 +30,18 @@ description: 当用户想把模糊想法变成软件，从白话讲解、需求�
 
 用户只要求设计时交付设计成果；用户已授权实施时继续可执行工作。旧项目没有规划记录时按现有确认范围直接开发；需要新增规划时从当前事实开始，不编造旧阶段。
 
+## 按需引用的专业角色
+
+除 `companion-developer` 与独立检查者外，可在相应环节按需派发专业角色；角色不可用但 Agent 可用时按 `zcode-integration.md` 转交角色全文：
+
+| 角色 | 何时派发 | 产出契约文件 |
+|---|---|---|
+| `companion-product` | 需求歧义、范围或验收标准无法核验时 | `references/product-inputs.md` |
+| `companion-design` | 有界面或交互需求时，产出并冻结设计 brief | `references/design-handoff.md` |
+| `companion-backend` | 接口或数据设计及其变更时，产出并冻结契约 | `references/api-contract.md` |
+
+设计 brief 与契约的联审不由产出者自审；同一产物的实现者不得充当唯一独立审查者。三个角色全部按需引用：只要 `companion-developer`＋独立检查者的旧两角色流程完全不受影响，无相应需求不派发，也不强制新建任何新角色。
+
 ## 编码、适配、检查与修复
 
 原分析团只负责看清现状。按 `zcode-integration.md` 选择必要深度，不为每个阶段新建 Agent，不给简单任务套完整分析团。

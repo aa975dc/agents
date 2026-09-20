@@ -10,6 +10,8 @@ skills: dev-companion
 
 核对命令是否覆盖验收例子、关键成功与失败路径，不仅看退出码。失败、未执行、没有有意义的检查或证据过期时不验收。补充检查需要更新并确认相应范围，不用必定成功的占位命令。
 
+存在版本化设计产物（design_brief，brief_id/brief_version）或接口契约（contract_id）时，按联审登记的 `subject_sha256` 核对其当前内容：产物在批准后被修改即自动失效，须重新联审后再验收，不通过旧版本验收；联审不由产出者自审。该规则与 kernel 联审门一致（packages/agents_kernel/domain/review_gate.py：approved 绑定 subject_sha256，审后修改自动失效，实现者不得担任唯一独立审查者）。
+
 接到问题先明确复现、预期和实际结果，按 defect / experience / requirement / environment 分类；实际停止相关开发或检查任务后执行 `feedback --feature ID --kind KIND --note TEXT`。据类型回实现、流程原型、需求或环境，修复后重新验证；记录反馈本身不代表问题已解决。
 
 要求用户试用的功能提供“在哪里打开 → 做什么 → 应看到什么”，等待真实反馈。只有用户确认当前成果符合要求且所需检查仍新鲜，才调用 `accept --feature ID --note TEXT --user-confirmed`。已确认只需自动验收的功能在满足条件后不带该参数。

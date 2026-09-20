@@ -7,7 +7,7 @@ skills: dev-companion
 读取本插件技能执行流程和 CLI 约定。输入 `$ARGUMENTS` 用于选择已确认范围，不构成任意新需求的授权。
 
 1. 读取 `status --format json`。规划项目须有六阶段当前有效成果，并用 technical scope 完成功能范围确认；尚缺成果就续接相应阶段。无规划记录的旧项目按现有确认范围执行，不补造历史。
-2. 选择一项当前可做功能，读取规则和已有修改，保存本次将修改的现有普通文件，说明新文件尚不在快照内。生成 `packet --feature ID` 后把真实任务包、`planning_context`、接口约定和文件边界交给 `companion-developer`。
+2. 选择一项当前可做功能，读取规则和已有修改，保存本次将修改的现有普通文件，说明新文件尚不在快照内。需求歧义先派 `companion-product` 重新界定；有界面/交互需求先由 `companion-design` 按冻结设计 brief 交接（`references/design-handoff.md`），接口/数据设计先由 `companion-backend` 按冻结契约交接（`references/api-contract.md`），联审均不由产出者自审；这些角色按需引用，无相应需求不派发。生成 `packet --feature ID` 后把真实任务包、`planning_context`、接口约定和文件边界交给 `companion-developer`。
 3. 一次只派发一项功能。核对开发者实际产物并导入 `receipt`，另起 `companion-checker` 独立检查功能；规划项目还需执行真实 integration 检查。角色不可用但 Agent 可用时转交角色全文；无 Agent 就记录未执行或未独立检查。
 4. 将缺陷回实现、体验问题回流程/原型、需求变化回需求、环境问题回环境处理。先实际停止相关运行任务，再记录 `feedback`。常规修复继续执行，范围变化先说明影响并更新相关记录。
 5. 通过检查后按 `companion-check` 提供真实试用并验收，不替用户填写试用结果。每轮读取状态；在未决问题存在时继续不依赖它的已授权工作。
