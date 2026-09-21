@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/tmp/fix2-review/agents_bf974a97_recheck_20260921/scripts/probe_boundaries.py", line 7, in <module>
+    from agents_kernel.digest import digest
+ModuleNotFoundError: No module named 'agents_kernel'

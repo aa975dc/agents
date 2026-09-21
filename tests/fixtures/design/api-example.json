@@ -1,0 +1,105 @@
+{
+  "contract_id": "status-page-v1",
+  "feature_id": "progress-board",
+  "kind": "local",
+  "title": "状态分页查询",
+  "entry": "agents_kernel.presentation.status_view.build_status_page(project, page, page_size)；CLI status --format json 目前未接分页参数，接入属契约变更须递增 contract_id 并写迁移注记",
+  "auth": "本机只读调用，无独立鉴权；写路径的授权以 references/cli-contract.md 的 --authorized 声明为准",
+  "request": {
+    "page": 1,
+    "page_size": 2
+  },
+  "request_rules": [
+    "page 与 page_size 必须是整数，非整数报 E_PARAM（实现原文：page必须是整数）",
+    "page 下限 1（越界钳制为 1）；page_size 上限 100（超出截断为 100）",
+    "省略时默认 page=1、page_size=100"
+  ],
+  "response": {
+    "total_estimated": 5,
+    "items": [
+      {
+        "id": "f1",
+        "title": "功能f1",
+        "status": "pending",
+        "evidence_stale": false,
+        "blocker": null
+      }
+    ],
+    "page": 1,
+    "page_size": 2,
+    "has_more": true,
+    "generated_at": "2026-09-20T08:00:00+00:00",
+    "source": "live",
+    "stale": false,
+    "title": "多功能项目",
+    "revision": 2,
+    "counts": {
+      "pending": 5,
+      "running": 0,
+      "awaiting_review": 0,
+      "accepted": 0,
+      "blocked": 0
+    },
+    "overall_percent": 0,
+    "next_step": "选择下一项待开始功能，交给开发者",
+    "fingerprint_status": "available"
+  },
+  "response_enums": {
+    "source": ["live", "cached", "store"],
+    "fingerprint_status": ["available", "unavailable"]
+  },
+  "response_semantics": [
+    "分页只切 items（features 列表）；counts、overall_percent、next_step 等汇总字段每页带全量，翻页不丢上下文",
+    "total_estimated 是当前视图 features 总数，本地视图内为精确值，字段名保留估计语义",
+    "source=cached 与 store 均伴随 stale=true：不是本次现算，绝不冒充最新；store 另有 fingerprint_status=unavailable",
+    "generated_at 为 UTC ISO-8601 字符串",
+    "overall_percent 为整数百分比或 null：范围未确认或恢复未完成时不计算，写 null 不写 0",
+    "counts 五个键固定齐全（pending/running/awaiting_review/accepted/blocked），缺项写 0 不省略",
+    "items 内为状态视图的 feature 对象，本例只展示真实存在的字段子集，不新增实现没有的字段"
+  ],
+  "error_codes": [
+    {
+      "code": "E_PARAM",
+      "exit_code": 2,
+      "when": "page/page_size 非整数等参数类型或取值错误，无法钳制"
+    },
+    {
+      "code": "E_PROJECT",
+      "exit_code": 2,
+      "when": "项目目录不存在，或台账记录损坏"
+    },
+    {
+      "code": "E_STATE",
+      "exit_code": 2,
+      "when": "状态版本冲突：调用携带的 revision/scope_version 与当前记录不符"
+    },
+    {
+      "code": "E_AUTH",
+      "exit_code": 2,
+      "when": "操作未获授权：缺少 --authorized 声明或验收条件未满足"
+    },
+    {
+      "code": "E_CHECK",
+      "exit_code": 3,
+      "when": "实际检查或发布命令执行失败（结果 passed=false）"
+    }
+  ],
+  "idempotency": {
+    "mode": "read_only",
+    "key": null,
+    "note": "本调用只读，同参数重复调用天然幂等；写路径按 api-contract.md 幂等三模式选择 revision CAS 或存储层幂等键（同键重放去重）"
+  },
+  "pagination": {
+    "style": "page/page_size 偏移分页，page 从 1 计",
+    "has_more_field": "has_more",
+    "page_size_max": 100
+  },
+  "migration": {
+    "breaking": false,
+    "coexistence": "分页字段为只读展示层新增；未分页的既有调用方继续读全量字段不受影响，两种读法并存期不限",
+    "rollback": "回退即调用方回到不分页全量视图；台账三 JSON 与 SQLite 存储的迁移互不影响本契约字段"
+  },
+  "measurement_required": [
+    "翻页延迟与 total_estimated 在超大规模 features 下的表现：未实测，本契约不声明任何性能数字；测量方法为对真实项目分别计时 page=1 与末页的 build_status_page 调用"
+  ]
+}

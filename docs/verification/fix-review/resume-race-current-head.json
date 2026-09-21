@@ -1,0 +1,24 @@
+{
+  "seed_epoch": 1,
+  "workers": [
+    {
+      "writer": "A",
+      "epoch": 2,
+      "registered": "A",
+      "success": true
+    },
+    {
+      "writer": "B",
+      "epoch": 2,
+      "registered": "B",
+      "success": true
+    }
+  ],
+  "final_writer": "B",
+  "final_epoch": 2,
+  "final_activity_ids": [
+    "B"
+  ],
+  "both_acquired_same_epoch": true,
+  "successful_A_activity_lost": true
+}

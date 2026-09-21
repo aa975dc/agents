@@ -1,0 +1,274 @@
+{
+  "manifest_version": 1,
+  "generated_at": "2026-09-20T21:58:17+00:00",
+  "source": {
+    "path": "packages/agents_kernel",
+    "commit": "c6a1549313735457bb66ff8afb7560ac1b7ca156"
+  },
+  "target": {
+    "plugin": "code-analysis-swarm",
+    "vendor_dir": "code-analysis-swarm/scripts/_kernel_vendor"
+  },
+  "files": [
+    {
+      "path": "agents_kernel/__init__.py",
+      "sha256": "80697c38422ed7283b9849ac64ffadce7250359e4e135eb1d037323e2ee7ad0a",
+      "bytes": 930
+    },
+    {
+      "path": "agents_kernel/atomicio.py",
+      "sha256": "d2b08c2443e28626bc760b9a1b294d9021a98e6579bb6a77bb6281bd70ff601e",
+      "bytes": 10160
+    },
+    {
+      "path": "agents_kernel/contracts/__init__.py",
+      "sha256": "8964e33da7895f5623985975d18c5b55d8709ac0373562926634f9c51736e89b",
+      "bytes": 415
+    },
+    {
+      "path": "agents_kernel/contracts/schemas.py",
+      "sha256": "13454cf4a0809da2377593eb2b23e6bb4a9b0dd76eb71f067eab9d2e8264e9b6",
+      "bytes": 13959
+    },
+    {
+      "path": "agents_kernel/digest.py",
+      "sha256": "c8cd63984d71b40bc4733edd5ff269484a06d3f79998e7268b18effb9f230dcb",
+      "bytes": 1684
+    },
+    {
+      "path": "agents_kernel/domain/__init__.py",
+      "sha256": "0975e263871c098bdd84851d767d5218c390653fa1f2867b73cbe9ba4e4a21f1",
+      "bytes": 294
+    },
+    {
+      "path": "agents_kernel/domain/handoff.py",
+      "sha256": "53e6a73b5ef0e94730103fbb8c73dfdfe65297ed6a30eee811137088851cd5df",
+      "bytes": 4677
+    },
+    {
+      "path": "agents_kernel/domain/review_gate.py",
+      "sha256": "0a9d337705e1aeab2720e75262f6ee8afff9ccc6076b0d3bb905f199f6bae7b1",
+      "bytes": 2832
+    },
+    {
+      "path": "agents_kernel/domain/review_record.py",
+      "sha256": "20de54d7fa02170d5c2e42b378cab554c6842153172c6a4803bf29febc14580d",
+      "bytes": 3020
+    },
+    {
+      "path": "agents_kernel/domain/tasks.py",
+      "sha256": "3f4be96e0cf433bad46b8ba8061454c91e6686fe4675f880ec1b2ca46bf43ab1",
+      "bytes": 13894
+    },
+    {
+      "path": "agents_kernel/domain/views.py",
+      "sha256": "e2100768351e7344040a8368ca9bd27981b269e729fead80b368b9de015b7224",
+      "bytes": 8077
+    },
+    {
+      "path": "agents_kernel/execution/__init__.py",
+      "sha256": "b87657826646480a01f9388eb2b768d6adad61d41d1028766983351c17f01acf",
+      "bytes": 543
+    },
+    {
+      "path": "agents_kernel/execution/backoff.py",
+      "sha256": "e495e05570bc1c1d2dd8bdc51fea427f51fe9100a1fd905b7ccdf1199ecac236",
+      "bytes": 6775
+    },
+    {
+      "path": "agents_kernel/execution/backpressure.py",
+      "sha256": "2fe6c1be762440df47fac01c74f12f3ef57235ea072aa444cd170af27d49d580",
+      "bytes": 4542
+    },
+    {
+      "path": "agents_kernel/execution/budget.py",
+      "sha256": "8770c028c9ce77ddb5c7d0f202d8bc1f5894454725c6b14be6087837229e8a3a",
+      "bytes": 4624
+    },
+    {
+      "path": "agents_kernel/execution/idempotency.py",
+      "sha256": "b1d223c37be358762f03b934d82ab958a764ef73f743be9c92d09f8573199096",
+      "bytes": 4359
+    },
+    {
+      "path": "agents_kernel/execution/isolation.py",
+      "sha256": "7f326a819b8b05b172c6e751a297042a193344a0690c7a9fbfeb27c60e3985d4",
+      "bytes": 14191
+    },
+    {
+      "path": "agents_kernel/execution/lease.py",
+      "sha256": "1cd1cb96d1b9a3efb8c7635e17773babb0cc5d828f93267ad1b3ef2340e15b53",
+      "bytes": 9296
+    },
+    {
+      "path": "agents_kernel/filesystem/__init__.py",
+      "sha256": "981577f3b71854c870969027deadbdd031aa816cd9c758964c57379a08a34851",
+      "bytes": 94
+    },
+    {
+      "path": "agents_kernel/filesystem/walk.py",
+      "sha256": "35ceffdeaea84cd9186285e43440ce438789605e9712e2b4e1b1692bf2e2f19f",
+      "bytes": 10276
+    },
+    {
+      "path": "agents_kernel/indexing/__init__.py",
+      "sha256": "f5d847e6961a068183fc82095c91a64184e12b395554d82bb0411c007526bd77",
+      "bytes": 455
+    },
+    {
+      "path": "agents_kernel/indexing/content_hash.py",
+      "sha256": "2e32b8beb78e200489861acf24824e80756893521db685adee409533711e6d32",
+      "bytes": 5150
+    },
+    {
+      "path": "agents_kernel/indexing/coordination.py",
+      "sha256": "1fbba66cc8e0c71bbee4eedd4c7201cab0f28e27a3544c38e7f4f1500a462f15",
+      "bytes": 21477
+    },
+    {
+      "path": "agents_kernel/indexing/edges.py",
+      "sha256": "8441be3363a30b4113fc0416aaec5c21e52394f820e3759c0b070c51126d1b92",
+      "bytes": 9573
+    },
+    {
+      "path": "agents_kernel/indexing/modules.py",
+      "sha256": "c175d84aa6d4729d5ba1670372385b26fa13eba62bc09f9c55d3ba7d22ef008b",
+      "bytes": 4724
+    },
+    {
+      "path": "agents_kernel/indexing/reader.py",
+      "sha256": "b2ab9367ac7b5ba95856ee8153e7b311576c58488bc816d548eaeec067b62837",
+      "bytes": 5508
+    },
+    {
+      "path": "agents_kernel/indexing/scanner.py",
+      "sha256": "bea283031f0911105268f01b7630d6b33ce6b878e38a439ae7b045dee34fd386",
+      "bytes": 9607
+    },
+    {
+      "path": "agents_kernel/indexing/sharding.py",
+      "sha256": "fbf2c2dfb04d702c795ca1ba29f57fcb9f367614b6a583473ed8e576061d9e7d",
+      "bytes": 27011
+    },
+    {
+      "path": "agents_kernel/indexing/slicing.py",
+      "sha256": "222cb2102175197459d5a34b5bdb508f8e3cb4d13261def161c94c8456cc6fdd",
+      "bytes": 8581
+    },
+    {
+      "path": "agents_kernel/paths.py",
+      "sha256": "741117dd91f7f25206bd3ceb1ea43d7706edaf2e71d83a864b0c032646c2c141",
+      "bytes": 2104
+    },
+    {
+      "path": "agents_kernel/presentation/__init__.py",
+      "sha256": "6b9f47686da1b86025cd4e23e45c2969d74684a8162a7bb2a7f22c3b90488f7b",
+      "bytes": 280
+    },
+    {
+      "path": "agents_kernel/presentation/status_view.py",
+      "sha256": "2e3e8dd8d1de0dbc0c3a5ae7ee09de226e41664d0b268055cc9fad109356487e",
+      "bytes": 5141
+    },
+    {
+      "path": "agents_kernel/process.py",
+      "sha256": "95aeecd028b84618846c5ef211d0ebfbf1b0bc561f6c80c7bcfdba4b6054319f",
+      "bytes": 3143
+    },
+    {
+      "path": "agents_kernel/services/__init__.py",
+      "sha256": "662bc010368159beff30c1e0f23440439ca17eaea85eceeabd5b1a36238cc824",
+      "bytes": 602
+    },
+    {
+      "path": "agents_kernel/services/campaign.py",
+      "sha256": "afefda2a21061a28f518d4e44aa43bd6a26cc55641621990a38c691b75a3a515",
+      "bytes": 16950
+    },
+    {
+      "path": "agents_kernel/services/closure.py",
+      "sha256": "98171013055d8dc4ef326d3389b821a88b610c0d1cbc41cc3ea2f69ac6d418f8",
+      "bytes": 3431
+    },
+    {
+      "path": "agents_kernel/services/coverage.py",
+      "sha256": "856e73bf84c6d40c52aa18b6aa48012ff79df1df9ecdc7418b2ae85c47e0f14b",
+      "bytes": 4030
+    },
+    {
+      "path": "agents_kernel/services/evidence_freshness.py",
+      "sha256": "6ad5de5275af0ccd0d9202694d65f37ca78abee5fc311b29226c474a2c828c92",
+      "bytes": 6422
+    },
+    {
+      "path": "agents_kernel/services/integration.py",
+      "sha256": "cfa63928d63e2998974590de2a5ff40f4a2a83870835e0409ca20cf500129335",
+      "bytes": 25387
+    },
+    {
+      "path": "agents_kernel/services/ownership.py",
+      "sha256": "b215fec01dd8ceee781993f21146b23943af066a84503d599e32f0ce165a4b13",
+      "bytes": 9141
+    },
+    {
+      "path": "agents_kernel/services/request_cache.py",
+      "sha256": "98619c1acc541440e3b87a7b7c41fa2cd313698ba26f182a60f227af66564a0a",
+      "bytes": 2121
+    },
+    {
+      "path": "agents_kernel/services/resume.py",
+      "sha256": "b1ba4e2ff387750796bea245bac8d591ae6db5d93a0cdc01298730ce4fd3f743",
+      "bytes": 18296
+    },
+    {
+      "path": "agents_kernel/services/review_board.py",
+      "sha256": "bc5d12f58b0ccf7dbf304a2bf9fef8cb31743227aa018a3c84e631f7e3f91675",
+      "bytes": 10676
+    },
+    {
+      "path": "agents_kernel/services/scheduler.py",
+      "sha256": "25fc2c5e395161802112e81507ff8cb666c1f3061e835f648266b3a85703d824",
+      "bytes": 7374
+    },
+    {
+      "path": "agents_kernel/services/summary.py",
+      "sha256": "a20fd6f323538d74fca24cef8eeb01e6ca6744d2f967d200010d26ddb7de6df8",
+      "bytes": 3485
+    },
+    {
+      "path": "agents_kernel/storage/__init__.py",
+      "sha256": "f395bd163c06aed5000a8d37705a24410a2f74f24108e731fe01662e8439dcde",
+      "bytes": 504
+    },
+    {
+      "path": "agents_kernel/storage/db.py",
+      "sha256": "38990956aeec6447f627689878345b2aa1596fffeb4a6a66d371e052780c6dfd",
+      "bytes": 12003
+    },
+    {
+      "path": "agents_kernel/storage/events.py",
+      "sha256": "43c28f37fe9c2d2a5933e2a4627ea03b4906c1034f0bf44ef38a6d55c7d33fb0",
+      "bytes": 4683
+    },
+    {
+      "path": "agents_kernel/storage/events_idem.py",
+      "sha256": "6de6d1539036dc77636fdd3593e426d62bad0e0b687f25ef8c9b11727e35e4a5",
+      "bytes": 1613
+    },
+    {
+      "path": "agents_kernel/storage/migration.py",
+      "sha256": "94c0097fd5b80d2c79f56b2a722381b8f4ae9e02097634cc09a2eda88d1f6333",
+      "bytes": 31372
+    },
+    {
+      "path": "agents_kernel/storage/team.py",
+      "sha256": "48b1a541eee31731c011866abe37fe2e2e83212ac2b612199da496f87929dc15",
+      "bytes": 72718
+    },
+    {
+      "path": "agents_kernel/validation.py",
+      "sha256": "cbe69389f0ad976906bd57c29323c766c1f9cb69d346a35045a8e1bd3ea61be3",
+      "bytes": 3808
+    }
+  ]
+}

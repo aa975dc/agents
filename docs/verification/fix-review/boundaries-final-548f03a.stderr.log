@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/tmp/fix-review/agents_source_review_1a7bc698_20260921/scripts/reproduce_boundaries.py", line 35, in <module>
+    created=expect_ok(root,'team-task','--set','never-executed','--feature','f1','--status','done')
+  File "/tmp/fix-review/agents_source_review_1a7bc698_20260921/scripts/reproduce_boundaries.py", line 24, in expect_ok
+    if code: raise RuntimeError(str(cmd)+': '+err)
+RuntimeError: ('team-task', '--set', 'never-executed', '--feature', 'f1', '--status', 'done'): {"success": false, "error": "任务 never-executed 不存在；请先 team-task-add 创建（门禁不接受任意状态 upsert，2026-09 复核 SR-01）", "state": "unknown_or_unchanged"}
+

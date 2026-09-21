@@ -1,0 +1,48 @@
+2026-09-20T14:55:54Z
+$ python3 tests/benchmarks/fixture_gen.py --help
+usage: fixture_gen.py [-h] [--files FILES] [--rows ROWS]
+                      [--generations GENERATIONS] [--seed SEED]
+                      [--big-files BIG_FILES] [--top-dirs TOP_DIRS]
+                      [--sub-dirs SUB_DIRS] [--max-bytes MAX_BYTES]
+                      [--dry-run]
+                      directory
+
+确定性基准 fixture 生成器（先 dry-run 后实跑）
+
+positional arguments:
+  directory             目标目录：必须位于临时目录下且目录名以 benchmark-fixture 开头
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --files FILES         physical files profile：内容文件总数（marker/manifest 不计入，与
+                        --rows 二选一）
+  --rows ROWS           current-distinct profile：当前代索引行数（含 marker/manifest 各 1
+                        的确定性映射，与 --files 二选一）
+  --generations GENERATIONS
+                        history retention profile：扫描代数。0=纯 fixture 不建索引；1=base
+                        扫描（current 口径）；K≥2=每轮受控变更后逐代扫描（累计行数为多代工作量口径）
+  --seed SEED
+  --big-files BIG_FILES
+                        大文件个数（缺省：规模≥10000 时 10 个，否则 0）
+  --top-dirs TOP_DIRS
+  --sub-dirs SUB_DIRS
+  --max-bytes MAX_BYTES
+                        实际写入字节限额（默认 2GiB，09 §5 自动小档上限）
+  --dry-run             只估算打印，不写任何文件
+
+$ python3 tests/benchmarks/fixture_gen.py /tmp/benchmark-fixture-cli-demo --rows 800 --generations 3 --top-dirs 4 --sub-dirs 4 --max-bytes 67108864 --dry-run
+DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-cli-demo files=800 small=798 big=0 bytes=964400 (0.9MiB) inodes=834 free=77118119936 (71.8GiB) limit=67108864 rows_per_gen=[800, 807, 811] rows_total=2418 rows_mode=1
+EXIT=0
+
+$ python3 tests/benchmarks/fixture_gen.py /tmp/benchmark-fixture-cli-demo --files 50000 --dry-run   # --files 物理口径（L 档兼容）
+DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-cli-demo files=50000 small=49990 big=10 bytes=191138010 (182.3MiB) inodes=60104 free=77126397952 (71.8GiB) limit=2147483648
+EXIT=0
+
+$ 限额拒绝演示（--max-bytes 1000000 < 内容字节）
+DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-cli-demo files=800 small=798 big=0 bytes=950971 (0.9MiB) inodes=821 free=77126393856 (71.8GiB) limit=1000000 rows_per_gen=[800] rows_total=800 rows_mode=1
+EXIT=0
+
+$ XL 目标档 dry-run（1,000,000 行，只估算不写盘；实跑需授权）
+DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-cli-xl files=1000000 small=999988 big=10 bytes=1332826864 (1271.1MiB) inodes=1010102 free=77125615616 (71.8GiB) limit=2147483648 rows_per_gen=[1000000] rows_total=1000000 rows_mode=1
+EXIT=0
+2026-09-20T14:56:13Z

@@ -1,0 +1,50 @@
+{
+  "contract_id": "todo-app-api-v1",
+  "feature_id": "todo-app",
+  "kind": "local",
+  "title": "任务清单本地调用契约",
+  "entry": "app.api.handle(action, payload)；action ∈ {add_task, complete_task, list_tasks}；演示服务器 POST /api/tasks 收 {action, payload} 转发同一入口",
+  "auth": "本机单用户演示：服务器只绑定 127.0.0.1，无独立鉴权；公网部署与多用户授权属范围外",
+  "request": {
+    "action": "add_task",
+    "payload": { "title": "买牛奶" }
+  },
+  "request_rules": [
+    "action 必须是三个枚举值之一，其它值报 E_PARAM（实现原文：未知操作：…）",
+    "add_task.title 去除首尾空白后必须非空，空串报 E_PARAM（实现原文：任务标题不能为空）",
+    "complete_task.task_id 必须是已存在的任务编号，未知编号报 E_PARAM（实现原文：任务不存在：N）",
+    "请求体缺失、超过 8192 字节或不可解析为 JSON 报 E_PARAM（实现原文：请求为空或过大）"
+  ],
+  "response": {
+    "task": { "id": 1, "title": "买牛奶", "done": false }
+  },
+  "response_enums": {
+    "task.done": [false, true]
+  },
+  "response_semantics": [
+    "add_task 与 complete_task 返回 {\"task\": …}，list_tasks 返回 {\"tasks\": […]} 按 id 升序",
+    "id 从 1 递增；不支持删除与编辑（范围外）；完成后 done=true 不可逆",
+    "无任务时 tasks 等于 []，不写 null；任务对象固定 id/title/done 三字段",
+    "持久化为本机 data/tasks.json，UTF-8 JSON 数组；时间与时区字段不存在，无 null/0 混用"
+  ],
+  "error_codes": [
+    {
+      "code": "E_PARAM",
+      "exit_code": 2,
+      "when": "action 未知、title 为空、task_id 不存在或请求体不可解析（HTTP 422，响应 {\"error\": 原文}；本契约只经本地调用入口或本机 HTTP 演示，无独立进程退出码）"
+    }
+  ],
+  "idempotency": {
+    "mode": "idempotency_key",
+    "key": "规划为客户端生成的请求 UUID；演示版未实现去重，重复提交 add_task 会产生两条任务（限制如实声明，生产化须先按 api-contract.md 幂等三模式补存储层同键去重）",
+    "note": "演示层数据写入是直接落盘 JSON，没有幂等键索引；本字段描述的是目标键构造规则与当前限制，不是已实现能力"
+  },
+  "migration": {
+    "breaking": false,
+    "coexistence": "首版契约；数据文件为 JSON 数组且仅 id/title/done 三字段，未来追加字段对旧读取方向后兼容",
+    "rollback": "删除 data/tasks.json 即回到空状态；无服务端 schema 迁移，无在线服务需回退"
+  },
+  "measurement_required": [
+    "并发写同一 data/tasks.json 的竞争行为未实测未加锁：测量方法为多进程同时 add 后核对 JSON 完整性与任务计数；本契约不声明任何性能数字"
+  ]
+}

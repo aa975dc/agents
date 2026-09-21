@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/tmp/fix2-review/agents_bf974a97_recheck_20260921/scripts/probe_bridge.py", line 18, in <module>
+    size=(large/'checkpoints/g2-progress.json').stat().st_size
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/pathlib.py", line 1222, in stat
+    return self._accessor.stat(self)
+FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/bf-review-bridge-fcslwy6n/large-progress/checkpoints/g2-progress.json'

@@ -1,0 +1,33 @@
+2026-09-20T09:28:57Z
+test_batches_committed_and_progress_visible (tests.benchmarks.test_l_tier.TestStep1_FullScanAndRss) ... ok
+test_rss_peak_within_512mib (tests.benchmarks.test_l_tier.TestStep1_FullScanAndRss) ... ok
+test_scan_row_count_matches_manifest (tests.benchmarks.test_l_tier.TestStep1_FullScanAndRss) ... ok
+test_spot_check_rows_against_filesystem (tests.benchmarks.test_l_tier.TestStep1_FullScanAndRss) ... ok
+test_count_from_manifest_not_table_scan (tests.benchmarks.test_l_tier.TestStep2_ReaderLatency) ... ok
+test_full_keyset_iteration_covers_all_rows (tests.benchmarks.test_l_tier.TestStep2_ReaderLatency) ... ok
+test_warm_page100_p50_p95 (tests.benchmarks.test_l_tier.TestStep2_ReaderLatency) ... ok
+test_status_thirty_timed_runs (tests.benchmarks.test_l_tier.TestStep3_CompanionStatusControl) ... ok
+test_changed_files_rehashed_and_others_reused (tests.benchmarks.test_l_tier.TestStep4_IncrementalHash) ... ok
+test_hash_path_rss_within_512mib (tests.benchmarks.test_l_tier.TestStep4_IncrementalHash) ... ok
+test_reused_and_computed_counts (tests.benchmarks.test_l_tier.TestStep4_IncrementalHash) ... ok
+test_row_count_stable_and_generation_advanced (tests.benchmarks.test_l_tier.TestStep4_IncrementalHash) ... ok
+test_kill9_mid_scan_then_recover (tests.benchmarks.test_l_tier.TestStep5_KillRecovery) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 36.909s
+
+OK
+
+L-TIER-RESULT fixture {"dir": "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-l-tier-30911", "dry_run": "DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-l-tier-30911 files=100000 small=99990 big=10 bytes=250080232 (238.5MiB) inodes=110112 free=78627713024 (73.2GiB) limit=2147483648", "generate": "GENERATED: /private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-l-tier-30911 (manifest.json + BENCHMARK_FIXTURE)", "manifest": {"big_files": [{"bytes": 5242880, "index": 0, "path": "big/blob_00.bin"}, {"bytes": 12582912, "index": 1, "path": "big/blob_01.bin"}, {"bytes": 19922944, "index": 2, "path": "big/blob_02.bin"}, {"bytes": 10485760, "index": 3, "path": "big/blob_03.bin"}, {"bytes": 17825792, "index": 4, "path": "big/blob_04.bin"}, {"bytes": 8388608, "index": 5, "path": "big/blob_05.bin"}, {"bytes": 15728640, "index": 6, "path": "big/blob_06.bin"}, {"bytes": 6291456, "index": 7, "path": "big/blob_07.bin"}, {"bytes": 13631488, "index": 8, "path": "big/blob_08.bin"}, {"bytes": 20971520, "index": 9, "path": "big/blob_09.bin"}], "created_at": "2026-09-20T09:29:19Z", "generation_seconds": 18.751, "inodes_estimate": 110112, "layout": {"files_per_leaf": 9, "leaves_total": 10000, "leaves_with_files": 10000, "remainder_leaves": 9990, "sub_dirs": 100, "top_dirs": 100}, "marker": "BENCHMARK_FIXTURE", "platform": "darwin", "python": "3.9.6", "requested_files": 100000, "seed": 20260920, "small_files": 99990, "total_bytes": 250080232, "total_files": 100000}, "on_disk_files": 100002}
+
+L-TIER-RESULT step1_full_scan {"child": {"batch_count": 21, "elapsed_seconds": 1.111, "file_count": 100002, "generation": 1, "hash_computed": 0, "hash_reused": 0, "mode": "plain", "rss_baseline_bytes": 13221888, "rss_peak_bytes": 35160064, "rss_unit_note": "macOS ru_maxrss 单位为字节"}, "parent_rss_peak_bytes": 94797824, "returncode": 0, "throughput_files_per_second": 90010.8}
+
+L-TIER-RESULT step2_reader_page100 {"max_s": 5.6e-05, "min_s": 5e-05, "p50_s": 5.3e-05, "p95_s": 5.3e-05, "page_size": 100, "reps": 30, "samples_s": [5.2e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.2e-05, 5.2e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.6e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.2e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5.2e-05, 5.2e-05, 5.3e-05, 5.3e-05, 5.3e-05, 5e-05, 5.1e-05, 5.2e-05, 5.3e-05]}
+
+L-TIER-RESULT step3_companion_status_control {"max_s": 0.037775, "min_s": 0.036131, "note": "subprocess 每次含解释器启动；status 恒为 live（跨进程无缓存）", "p50_s": 0.036863, "p95_s": 0.037595, "project_files": 50, "reps": 30, "samples_s": [0.037185, 0.037003, 0.036966, 0.036314, 0.036466, 0.037131, 0.037289, 0.037243, 0.037429, 0.036451, 0.0367, 0.036456, 0.036928, 0.036174, 0.03673, 0.037014, 0.036863, 0.03731, 0.036556, 0.037413, 0.036421, 0.037595, 0.036131, 0.03723, 0.036363, 0.037231, 0.036615, 0.036588, 0.037775, 0.036826]}
+
+L-TIER-RESULT step4_incremental_hash {"backfill_first_round": {"batches": 21, "hashed": 100002, "skipped": 0}, "changed_files": 1000, "child": {"batch_count": 21, "elapsed_seconds": 1.595, "file_count": 100002, "generation": 2, "hash_computed": 1000, "hash_reused": 99002, "mode": "plain", "rss_baseline_bytes": 13369344, "rss_peak_bytes": 45940736, "rss_unit_note": "macOS ru_maxrss 单位为字节"}, "returncode": 0, "throughput_files_per_second": 62697.2}
+
+L-TIER-RESULT step5_kill_recovery {"killed_child_returncode": -9, "killed_generation_status": "active", "rescan": {"batch_count": 21, "elapsed_seconds": 1.488, "file_count": 100002, "generation": 4, "hash_computed": 0, "hash_reused": 100002, "mode": "plain", "rss_baseline_bytes": 13221888, "rss_peak_bytes": 46006272, "rss_unit_note": "macOS ru_maxrss 单位为字节"}, "rescan_returncode": 0, "staging_rows_at_kill": 15000}
+EXIT=0
+2026-09-20T09:29:39Z

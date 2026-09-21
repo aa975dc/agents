@@ -1,0 +1,226 @@
+{
+  "team_cli_gate_bypass": {
+    "new_task_done_accepted": true,
+    "displayed_tasks": {
+      "items": [
+        {
+          "task_id": "never-executed",
+          "feature_id": "f1",
+          "status": "done",
+          "updated_seq": 2
+        }
+      ],
+      "has_more": false
+    },
+    "done_to_ready_accepted": true,
+    "blocked_without_reason_accepted": true,
+    "evidence_count": 0
+  },
+  "normal_chat_status_on_team_only_project": {
+    "exit_code": 2,
+    "error": "{\"success\": false, \"error\": \"尚未建立需求记录，请先整理需求并运行 init\", \"state\": \"unknown_or_unchanged\"}\n",
+    "team_status_works": true
+  },
+  "team_status_follows_external_db_symlink": {
+    "exit_code": 2,
+    "error": "{\"success\": false, \"error\": \"team 事实库不能是文件链接（指向 /var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/outside-sentinel.sqlite）；追随链接会把团队事实读写到项目边界之外\", \"state\": \"unknown_or_unchanged\"}\n",
+    "outside_database_changed": false,
+    "tables_after": [
+      "sentinel"
+    ],
+    "sentinel_preserved": true
+  },
+  "parent_symlink_positive_control": {
+    "exit_code": 2,
+    "error": "{\"success\": false, \"error\": \"项目记录目录不能是文件链接\", \"state\": \"unknown_or_unchanged\"}\n"
+  },
+  "legacy_ix05_final_accept_control": {
+    "same_size": true,
+    "same_mtime_ns": true,
+    "initial_check_passed": true,
+    "accept_after_change_exit_code": 2,
+    "error": "{\"success\": false, \"error\": \"缺少当前内容的成功检查，请先运行 check\", \"state\": \"unknown_or_unchanged\"}\n"
+  },
+  "migration_after_new_facts": {
+    "team_tasks_before": [
+      {
+        "task_id": "f1",
+        "feature_id": "f1",
+        "status": "done",
+        "updated_seq": 5
+      },
+      {
+        "task_id": "new-after-migration",
+        "feature_id": "f1",
+        "status": "ready",
+        "updated_seq": 4
+      }
+    ],
+    "exported_task_ids": [
+      "f1"
+    ],
+    "exported_task_statuses": {
+      "f1": "done"
+    },
+    "export_result": {
+      "out_dir": "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/export",
+      "files": {
+        "state.json": "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/export/state.json"
+      },
+      "head_seq": 5,
+      "warnings": [],
+      "sources_sha256": "9d9c37d35db4c879742cc405cb5082a48cbad7cab4f0c4e4a5f6476ff53327ef"
+    },
+    "legacy_load_error": "无法识别任务状态",
+    "new_task_missing_in_export": true
+  },
+  "cli_trace": [
+    {
+      "args": [
+        "team-init",
+        "--feature",
+        "f1",
+        "Feature"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/new-team/.dev-companion/team.db\",\n  \"feature_id\": \"f1\",\n  \"title\": \"Feature\",\n  \"status\": \"draft\",\n  \"seq\": 1,\n  \"applied\": true,\n  \"generation\": 1\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-task",
+        "--set",
+        "never-executed",
+        "--feature",
+        "f1",
+        "--status",
+        "done"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/new-team/.dev-companion/team.db\",\n  \"task_id\": \"never-executed\",\n  \"feature_id\": \"f1\",\n  \"status\": \"done\",\n  \"seq\": 2,\n  \"applied\": true,\n  \"deduped\": false,\n  \"generation\": 2\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-status"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/new-team/.dev-companion/team.db\",\n  \"generation\": 2,\n  \"offset\": 0,\n  \"limit\": 50,\n  \"features\": {\n    \"items\": [\n      {\n        \"feature_id\": \"f1\",\n        \"title\": \"Feature\",\n        \"status\": \"draft\",\n        \"scope_version\": 0,\n        \"updated_seq\": 1,\n        \"scope\": []\n      }\n    ],\n    \"has_more\": false\n  },\n  \"tasks\": {\n    \"items\": [\n      {\n        \"task_id\": \"never-executed\",\n        \"feature_id\": \"f1\",\n        \"status\": \"done\",\n        \"updated_seq\": 2\n      }\n    ],\n    \"has_more\": false\n  }\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-task",
+        "--set",
+        "never-executed",
+        "--feature",
+        "f1",
+        "--status",
+        "ready"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/new-team/.dev-companion/team.db\",\n  \"task_id\": \"never-executed\",\n  \"feature_id\": \"f1\",\n  \"status\": \"ready\",\n  \"seq\": 3,\n  \"applied\": true,\n  \"deduped\": false,\n  \"generation\": 3\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-task",
+        "--set",
+        "never-executed",
+        "--feature",
+        "f1",
+        "--status",
+        "blocked"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/new-team/.dev-companion/team.db\",\n  \"task_id\": \"never-executed\",\n  \"feature_id\": \"f1\",\n  \"status\": \"blocked\",\n  \"seq\": 4,\n  \"applied\": true,\n  \"deduped\": false,\n  \"generation\": 4\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "status",
+        "--format",
+        "json"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "{\"success\": false, \"error\": \"尚未建立需求记录，请先整理需求并运行 init\", \"state\": \"unknown_or_unchanged\"}\n"
+    },
+    {
+      "args": [
+        "team-status"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "{\"success\": false, \"error\": \"team 事实库不能是文件链接（指向 /var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/outside-sentinel.sqlite）；追随链接会把团队事实读写到项目边界之外\", \"state\": \"unknown_or_unchanged\"}\n"
+    },
+    {
+      "args": [
+        "team-init",
+        "--feature",
+        "f1",
+        "Feature"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "{\"success\": false, \"error\": \"项目记录目录不能是文件链接\", \"state\": \"unknown_or_unchanged\"}\n"
+    },
+    {
+      "args": [
+        "accept",
+        "--feature",
+        "f1",
+        "--note",
+        "attempt reuse old verification"
+      ],
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "{\"success\": false, \"error\": \"缺少当前内容的成功检查，请先运行 check\", \"state\": \"unknown_or_unchanged\"}\n"
+    },
+    {
+      "args": [
+        "team-migrate",
+        "--from-json"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"project\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate\",\n  \"db_path\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate/.dev-companion/team.db\",\n  \"sources_sha256\": \"9d9c37d35db4c879742cc405cb5082a48cbad7cab4f0c4e4a5f6476ff53327ef\",\n  \"sources\": {\n    \"state.json\": {\n      \"sha256\": \"f549d13e9cabceb884eed97f70f3cd5171bd590130e0d08de4290f05fc75fbee\",\n      \"bytes\": 2061,\n      \"lines\": 82,\n      \"present\": true\n    },\n    \"journey.json\": {\n      \"sha256\": null,\n      \"bytes\": 0,\n      \"lines\": 0,\n      \"present\": false\n    },\n    \"release.json\": {\n      \"sha256\": null,\n      \"bytes\": 0,\n      \"lines\": 0,\n      \"present\": false\n    }\n  },\n  \"planned\": {\n    \"scope_revision\": 1,\n    \"feature_status\": 1,\n    \"task_status\": 1\n  },\n  \"planned_total\": 3,\n  \"history_counts\": {\n    \"state_events\": 2,\n    \"journey_history\": 0,\n    \"release_history\": 0\n  },\n  \"warnings\": [],\n  \"status\": \"imported\",\n  \"dry_run\": false,\n  \"applied\": 3,\n  \"deduped\": 0,\n  \"head_seq\": 3,\n  \"manifest\": {\n    \"migration_version\": 1,\n    \"store_schema_version\": 1,\n    \"project\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate\",\n    \"sources\": {\n      \"state.json\": {\n        \"sha256\": \"f549d13e9cabceb884eed97f70f3cd5171bd590130e0d08de4290f05fc75fbee\",\n        \"bytes\": 2061,\n        \"lines\": 82,\n        \"present\": true\n      },\n      \"journey.json\": {\n        \"sha256\": null,\n        \"bytes\": 0,\n        \"lines\": 0,\n        \"present\": false\n      },\n      \"release.json\": {\n        \"sha256\": null,\n        \"bytes\": 0,\n        \"lines\": 0,\n        \"present\": false\n      }\n    },\n    \"sources_sha256\": \"9d9c37d35db4c879742cc405cb5082a48cbad7cab4f0c4e4a5f6476ff53327ef\",\n    \"counts\": {\n      \"scope_revision\": 1,\n      \"feature_status\": 1,\n      \"task_status\": 1\n    },\n    \"history_counts\": {\n      \"state_events\": 2,\n      \"journey_history\": 0,\n      \"release_history\": 0\n    },\n    \"legacy\": {\n      \"revision\": 2,\n      \"scope_version\": 1,\n      \"confirmed\": true,\n      \"scope_context\": {\n        \"title\": \"Independent audit fixture\",\n        \"goal\": \"verify gates\",\n        \"audience\": \"test\",\n        \"scenario\": \"isolated local test\",\n        \"out_of_scope\": [],\n        \"assumptions\": []\n      },\n      \"journey_revision\": 0,\n      \"release_revision\": 0\n    },\n    \"warnings\": [],\n    \"imported_at\": \"2026-09-20T17:45:11.124795+00:00\"\n  },\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate/.dev-companion/team.db\"\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-task",
+        "--set",
+        "new-after-migration",
+        "--feature",
+        "f1",
+        "--status",
+        "ready"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate/.dev-companion/team.db\",\n  \"task_id\": \"new-after-migration\",\n  \"feature_id\": \"f1\",\n  \"status\": \"ready\",\n  \"seq\": 4,\n  \"applied\": true,\n  \"deduped\": false,\n  \"generation\": 4\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-task",
+        "--set",
+        "f1",
+        "--feature",
+        "f1",
+        "--status",
+        "done"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate/.dev-companion/team.db\",\n  \"task_id\": \"f1\",\n  \"feature_id\": \"f1\",\n  \"status\": \"done\",\n  \"seq\": 5,\n  \"applied\": true,\n  \"deduped\": false,\n  \"generation\": 5\n}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "team-status"
+      ],
+      "exit_code": 0,
+      "stdout": "{\n  \"store\": \"/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/agents-independent-probes-e9gpgmvc/migrate/.dev-companion/team.db\",\n  \"generation\": 5,\n  \"offset\": 0,\n  \"limit\": 50,\n  \"features\": {\n    \"items\": [\n      {\n        \"feature_id\": \"f1\",\n        \"title\": \"Feature\",\n        \"status\": \"pending\",\n        \"scope_version\": 1,\n        \"updated_seq\": 2,\n        \"scope\": [\n          \"app.py\"\n        ]\n      }\n    ],\n    \"has_more\": false\n  },\n  \"tasks\": {\n    \"items\": [\n      {\n        \"task_id\": \"f1\",\n        \"feature_id\": \"f1\",\n        \"status\": \"done\",\n        \"updated_seq\": 5\n      },\n      {\n        \"task_id\": \"new-after-migration\",\n        \"feature_id\": \"f1\",\n        \"status\": \"ready\",\n        \"updated_seq\": 4\n      }\n    ],\n    \"has_more\": false\n  }\n}\n",
+      "stderr": ""
+    }
+  ]
+}

@@ -15,6 +15,12 @@ description: 当用户想把模糊想法变成软件，从白话讲解、需求�
 
 先读取 `status --format json`、必要时 `planning-status` 和 `release-status`。已有记录则续接，读取失败保留现场。旧 `state.json` schema 1 与新 `journey.json` schema 1 并存，旧项目不需要迁移、不推测已有历史阶段完成。
 
+## team 模式检测与路由
+
+项目根 `.dev-companion/team.db` 存在且无旧 `state.json` → **team 模式**：`status`/`progress` 自动返回团队聚合视图（含 generation 与事实源路径），`resume` 返回持久事实还原的门禁续接清单，`check` 做只读门禁审计。无 `team.db` 的项目一切照旧（legacy 三 JSON 流程不受影响）；team.db 与三 JSON 并存的迁移项目继续走 legacy 入口，需要团队事实时显式用 `team-*` 命令。
+
+team 模式的执行一律走门禁动作序列，禁止手写状态模拟闭环：`team-init`（登记功能，`--review-required` 决定是否强制独立审查）→ `team-task-add`（创建任务：类型/依赖/文件级 `--allowed-paths` 精确清单，不用通配）→ `team-task --status ready`（派发）→ `--status running`（开始执行，自动建 attempt）→ `team-report`（回报 outcome/summary/changed_files 与产出固定 `--artifact-sha256`）→ `team-approve`（独立审查者批准；实现者自审被拒）→ `team-task --status done`（门禁校验 attempt+回报+批准+证据，缺一即拒并说明缺什么）→ `team-integrate`（候选→版本→真实版本级回归→completed）。`blocked`/`cancelled`/`failed` 必须 `--reason`。`done→ready` 等非法转换被白名单拒绝；不能用任意 `--status` upsert 把未执行任务写成 done——门禁拒绝本身就是探针场景的负向断言。
+
 ## 前六阶段：想清楚并保存成果
 
 1. **concept，白话概念**：用日常场景复述使用者、问题、操作场景和预期结果。区分用户原意、AI 举例与假设；说明软件的模糊概念。每轮只问 1–3 个会影响当前决策的问题，允许“不知道，请推荐”。首轮 `plan --stage concept --input PATH --revision 0` 可保存未完成草案，不要求技术文件路径。
@@ -29,6 +35,18 @@ description: 当用户想把模糊想法变成软件，从白话讲解、需求�
 六阶段全部有效完成后，将 technical 的完整 scope 交给既有 `init` 或 `scope`；确认开发范围时使用 state 的最新 revision 调用 `confirm`。已有明确范围授权据实沿用。这一步保留原功能台账的验收契约，不能把产品确认误当代码完成。
 
 用户只要求设计时交付设计成果；用户已授权实施时继续可执行工作。旧项目没有规划记录时按现有确认范围直接开发；需要新增规划时从当前事实开始，不编造旧阶段。
+
+## 按需引用的专业角色
+
+除 `companion-developer` 与独立检查者外，可在相应环节按需派发专业角色；角色不可用但 Agent 可用时按 `zcode-integration.md` 转交角色全文：
+
+| 角色 | 何时派发 | 产出契约文件 |
+|---|---|---|
+| `companion-product` | 需求歧义、范围或验收标准无法核验时 | `references/product-inputs.md` |
+| `companion-design` | 有界面或交互需求时，产出并冻结设计 brief | `references/design-handoff.md` |
+| `companion-backend` | 接口或数据设计及其变更时，产出并冻结契约 | `references/api-contract.md` |
+
+设计 brief 与契约的联审不由产出者自审；同一产物的实现者不得充当唯一独立审查者。三个角色全部按需引用：只要 `companion-developer`＋独立检查者的旧两角色流程完全不受影响，无相应需求不派发，也不强制新建任何新角色。
 
 ## 编码、适配、检查与修复
 

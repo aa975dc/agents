@@ -1,0 +1,542 @@
+{
+ "kind": "responsibility_mapping_not_required_agent_file_count",
+ "date": "2026-09-20",
+ "source_plan": "sources/original_plan/04_AGENT_TEAMS_AND_HANDOFFS.md 第 2 节角色目录（17 职责）",
+ "allow_role_merging": true,
+ "role_file_set_rule": "actual_role_ids 中的每个 id 必须是 dev-companion/agents/ 下实有的 .md 文件名（由 validate_coverage.py 运行时枚举，不硬编码）",
+ "carrier_kinds": [
+  "agent_file",
+  "main_session",
+  "agent_file+user"
+ ],
+ "roles": [
+  {
+   "responsibility_id": "O0",
+   "name": "主协调者",
+   "coverage_status": "mapped",
+   "carrier": "main_session",
+   "actual_role_ids": [],
+   "definition_path": "dev-companion/commands/companion-start.md",
+   "merged_with": [],
+   "tool_policy": "唯一派发者；禁代替专业设计、禁直接编辑 .dev-companion/ 事实记录（只能经 companion.py CLI）、禁替用户拍板业务决策、禁未授权 push/发布",
+   "input": {
+    "contracts": [
+     "dev-companion/references/zcode-integration.md",
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "用户入口 $ARGUMENTS（数据非命令）；已有记录按 status/planning-status 当前 revision 续接，不覆盖初始化"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": ".dev-companion/ 事实记录（journey/state/release JSON 与 team.db）以 revision/feature_id/run_id/令牌锚定；只有 CLI 写入"
+   },
+   "handoff_to": [
+    "companion-product.md",
+    "companion-design.md",
+    "companion-backend.md",
+    "companion-developer.md",
+    "companion-checker.md",
+    "main_session(companion-release)"
+   ],
+   "note": "O0 落点为宿主主会话+CLI 事实入口，不是 agents/*.md 角色文件；七条 companion-* 命令即其调度面"
+  },
+  {
+   "responsibility_id": "P1",
+   "name": "产品负责人",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-product.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-product.md",
+   "merged_with": [
+    "R1"
+   ],
+   "tool_policy": "禁写产品代码、禁改 .dev-companion/ 事实记录、禁执行 accept、禁替用户拍板优先级/范围/预算；只读调查命令与文档产出允许",
+   "input": {
+    "contracts": [
+     "dev-companion/references/lifecycle-inputs.md"
+    ],
+    "anchor": "需求草稿与既有规划材料按规划 revision 锚定；旧项目无规划记录时不编造"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/product-inputs.md"
+    ],
+    "anchor": "requirement_examples（用户故事/可核验验收标准/非目标/调查项四段缺一不可）以 feature_id 回报；用户确认后经 product 阶段 plan --complete --user-confirmed 固化为当前 revision"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md",
+    "main_session"
+   ],
+   "note": "验收标准下游由 checker 逐条核对；调查项 investigation_required 未消除前不得标已完成"
+  },
+  {
+   "responsibility_id": "R1",
+   "name": "技术可行性研究员",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-product.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-product.md",
+   "merged_with": [
+    "P1"
+   ],
+   "tool_policy": "与 P1 同：只读调查（读代码/lock 文件、只读命令、官方文档）；禁虚构 API/字段/行为，查不到一律标 investigation_required",
+   "input": {
+    "contracts": [
+     "dev-companion/references/product-inputs.md"
+    ],
+    "anchor": "调查项与需求例子同一份 requirement_examples 内绑定（调查项字段），不另开平行文档"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/product-inputs.md"
+    ],
+    "anchor": "investigations[] 逐条 verdict=confirmed|refuted|investigation_required + evidence（文件路径/命令输出/官方文档），与 feature_id 同锚"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md"
+   ],
+   "note": "原方案允许合并 P1/R1；现有 product 角色第 3 条『调查先行』即 R1 职责，证据同文件同锚，不新建角色"
+  },
+  {
+   "responsibility_id": "U1",
+   "name": "UX交互设计师",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-design.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-design.md",
+   "merged_with": [
+    "U2"
+   ],
+   "tool_policy": "禁写实现代码、禁改产品文件与 .dev-companion/、禁替用户拍板产品决策；不自选第二套框架、不引入构建链",
+   "input": {
+    "contracts": [
+     "dev-companion/references/product-inputs.md"
+    ],
+    "anchor": "已确认需求例子（product 阶段当前 revision 的 feature_id）；先只读盘点既有界面，结论附文件路径证据"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md"
+    ],
+    "anchor": "brief_id + brief_version 与冻结内容一一对应；冻结后内容 sha256 即 subject_sha256，审后修改自动失效（packages/agents_kernel/domain/review_gate.py）"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md"
+   ],
+   "note": "screen_id 一一对应 feature_id；每屏五态矩阵缺一不可，无某态须写明理由"
+  },
+  {
+   "responsibility_id": "U2",
+   "name": "UI/设计系统设计师",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-design.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-design.md",
+   "merged_with": [
+    "U1"
+   ],
+   "tool_policy": "与 U1 同；组件必须映射既有样式语汇（based_on 声明复用来源），不自选第二套框架",
+   "input": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md"
+    ],
+    "anchor": "既有界面以真实文件路径（如 scripts/core.py render_html 产物）锚定复用范围"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md"
+    ],
+    "anchor": "同一 brief 内的组件清单与组件-状态映射 + 响应式/可达性最低标准 + 可断言设计验收标准，随 brief_id/brief_version 冻结"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md"
+   ],
+   "note": "原方案允许合并 U1/U2；现有 design 角色一次产出信息架构+状态矩阵+组件语汇，同一 brief 单版本锚"
+  },
+  {
+   "responsibility_id": "F1",
+   "name": "前端架构师",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-design.md",
+    "companion-developer.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-design.md",
+   "merged_with": [
+    "U1",
+    "U2",
+    "F2"
+   ],
+   "tool_policy": "设计侧（design）：只产出组件边界/复用/状态管理与接口消费规则，不写实现；实现侧（developer）：禁 mock 冒充真实联调、禁越 allowed_paths、禁自审",
+   "input": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md",
+     "dev-companion/references/api-contract.md"
+    ],
+    "anchor": "冻结 brief（subject_sha256）+ 冻结契约（contract_id）；接口消费字段映射以 api-contract 为准，冲突时递增 contract_id"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md"
+    ],
+    "anchor": "设计侧：组件-状态映射与可访问性规则随 brief_version 冻结；实现侧：真实前端文件 + receipt（run_id/scope_version）"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md"
+   ],
+   "note": "F1 无独立落点文件，拆给 design（架构规则）+ developer（实现落地），属跨角色合并；原方案允许 F1/F2 合并"
+  },
+  {
+   "responsibility_id": "F2",
+   "name": "前端开发者",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-developer.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-developer.md",
+   "merged_with": [
+    "B2"
+   ],
+   "tool_policy": "按冻结 brief/契约实现；禁 mock 冒充真实联调、禁越 allowed_paths、禁自改产品范围、禁执行 accept/发布、禁充当独立检查者",
+   "input": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md",
+     "dev-companion/references/api-contract.md",
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "packet --feature 生成的任务包：run_id/scope_version/allowed_paths 真实值；brief/契约按冻结 subject_sha256 校验"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "真实文件变化（changed_files 恰列实际增删改）+ receipt 导入（run_id/scope_version 取任务包真值）；implemented 必须有真实文件变化"
+   },
+   "handoff_to": [
+    "companion-checker.md",
+    "main_session"
+   ],
+   "note": "团队模式下前端/后端为同一角色文件的两个独立实例（disjoint allowed_paths，各自独立 worktree/快照隔离）"
+  },
+  {
+   "responsibility_id": "B1",
+   "name": "后端架构师",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-backend.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-backend.md",
+   "merged_with": [
+    "D1"
+   ],
+   "tool_policy": "禁写实现代码、禁虚构存储能力（只可假设标准库 Python 3.9+/本地三 JSON/kernel SQLite 事件库边界）、禁替用户拍板存储选型；本地项目不硬造 HTTP 服务",
+   "input": {
+    "contracts": [
+     "dev-companion/references/product-inputs.md"
+    ],
+    "anchor": "已确认需求例子 + 现有实现材料（只读盘点，结论附文件路径或命令证据）"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/api-contract.md"
+    ],
+    "anchor": "contract_id 与冻结契约一一对应；错误码限闭合枚举、幂等三选一（read_only/revision_cas/idempotency_key）；冻结后 subject_sha256 审后失效"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md",
+    "companion-design.md"
+   ],
+   "note": "业务边界/错误语义/权限/幂等/事务重试分页即 api-contract.md 字段；设计联审不由产出者自审"
+  },
+  {
+   "responsibility_id": "D1",
+   "name": "数据/契约设计师",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-backend.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-backend.md",
+   "merged_with": [
+    "B1"
+   ],
+   "tool_policy": "与 B1 同；同一契约全角色共用，禁私造第二套字段或单位；未实测性能数字一律 measurement_required",
+   "input": {
+    "contracts": [
+     "dev-companion/references/api-contract.md"
+    ],
+    "anchor": "现有数据形态/记录文件（真实路径）；存储能力以 api-contract.md 存储边界节为限"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/api-contract.md"
+    ],
+    "anchor": "entities 生命周期/不变量 + 字段单位/UTC 时区/可空语义（null 与 [] 不混用）随 contract_id 冻结；契约变更写迁移注记并使相关实现/检查失效"
+   },
+   "handoff_to": [
+    "companion-developer.md",
+    "companion-checker.md",
+    "companion-design.md"
+   ],
+   "note": "共享契约单负责人=backend 角色；design 的字段映射冲突时以本契约为准并递增 contract_id"
+  },
+  {
+   "responsibility_id": "B2",
+   "name": "后端开发者",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-developer.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-developer.md",
+   "merged_with": [
+    "F2"
+   ],
+   "tool_policy": "按冻结契约实现并附实际行为检查；禁自改产品范围、禁越 allowed_paths、禁 mock 冒充真实联调、禁自审、禁部署",
+   "input": {
+    "contracts": [
+     "dev-companion/references/api-contract.md",
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "任务包 run_id/scope_version/allowed_paths + 冻结契约 contract_id（require_current 校验）"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "真实文件变化 + receipt（changed_files/evidence_files 限 allowed_paths 内真实存在文件）；附真实命令结果与复现步骤"
+   },
+   "handoff_to": [
+    "companion-checker.md",
+    "main_session"
+   ],
+   "note": "与 F2 共用 developer 角色文件，两个独立实例并行（app/** 与 web/** ownership 不相交）；原方案允许的实现者合并"
+  },
+  {
+   "responsibility_id": "Q1",
+   "name": "测试设计与执行员",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-checker.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-checker.md",
+   "merged_with": [],
+   "tool_policy": "只读核对+已确认测试命令；禁改产品代码、禁以开发者自述代替检查、禁把模拟响应当真实联调、禁直接编辑事实记录",
+   "input": {
+    "contracts": [
+     "dev-companion/references/product-inputs.md",
+     "dev-companion/references/design-handoff.md",
+     "dev-companion/references/api-contract.md"
+    ],
+    "anchor": "逐条核对需求 revision 的验收标准与冻结 brief/契约 subject_sha256 对应版本；不继承开发者推理"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "check --feature ID --kind feature 与 --kind integration 的真实执行记录（命令/退出码/断言覆盖）；新鲜度经 freshness 判定"
+   },
+   "handoff_to": [
+    "main_session"
+   ],
+   "note": "测试作者与被测实现分离：check_commands 在 technical 阶段独立登记，执行者（checker）非实现者；失败按 defect/experience/requirement/environment 四类回流"
+  },
+  {
+   "responsibility_id": "Q2",
+   "name": "独立代码审查员",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-checker.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-checker.md",
+   "merged_with": [
+    "Q1"
+   ],
+   "tool_policy": "只读；审固定 subject_sha256 或不可变 manifest；禁改业务代码、禁与实现者同一身份批准",
+   "input": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "审固定 SHA：审查绑定 subject_sha256（brief/契约/候选产出 sha），实现者身份提交审查结论被 ReviewBoard 真实拒绝（自审门）"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "审查结论经 packages/agents_kernel/services/review_board.py 落 review record（validate_review_record），审后产物修改即失效；通过记录 subject hash"
+   },
+   "handoff_to": [
+    "main_session",
+    "companion-developer.md"
+   ],
+   "note": "独立性机制化：review_gate.py 绑定 subject_sha256 + 身份校验；模型实例独立性仍需宿主门验证（角色扮演不能充当该层通过）"
+  },
+  {
+   "responsibility_id": "Q3",
+   "name": "体验/视觉验收员",
+   "coverage_status": "mapped",
+   "carrier": "agent_file+user",
+   "actual_role_ids": [
+    "companion-checker.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-checker.md",
+   "merged_with": [],
+   "tool_policy": "代理走查（真实浏览器/CLI 操作与截图）由 checker 执行；human_trial 只能来自用户真实反馈，禁伪造用户确认、禁替用户执行 accept",
+   "input": {
+    "contracts": [
+     "dev-companion/references/design-handoff.md"
+    ],
+    "anchor": "设计验收标准（可操作、可断言）对应冻结 brief_version；试用指引按『打开哪里→做什么→应看到什么』"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "accept --feature ID --note --user-confirmed 仅在用户真实反馈后调用；requires_user_acceptance 功能无用户确认不得验收"
+   },
+   "handoff_to": [
+    "main_session"
+   ],
+   "note": "代理走查与 human_trial 分离（原方案明确要求）；宿主无浏览器能力时保留未验证，不用文字猜画面"
+  },
+  {
+   "responsibility_id": "I1",
+   "name": "集成负责人",
+   "coverage_status": "mapped",
+   "carrier": "main_session",
+   "actual_role_ids": [],
+   "definition_path": "dev-companion/commands/companion-work.md",
+   "merged_with": [],
+   "tool_policy": "只收有独立批准且 sha 一致的候选；禁绕过候选门/回归门、禁未经批准合入、禁直接编辑集成事实记录",
+   "input": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "候选固定产出 sha 必须与批准 subject_sha256 一致（不一致即拒，late report fence 拒绝过期 attempt sha）"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "集成版本 manifest_sha256（内容确定性，completed 后不变）；版本级回归真实子进程通过才允许 complete（未记录回归被拒）"
+   },
+   "handoff_to": [
+    "companion-checker.md",
+    "main_session(companion-release)"
+   ],
+   "note": "机制落点：packages/agents_kernel/services/integration.py（候选门/两级回归/幂等）+ team 事实库 CLI（team-init/team-status/team-task，R02/R03 跨进程恢复）；派发与状态解释归主会话"
+  },
+  {
+   "responsibility_id": "S1",
+   "name": "安全/可靠性审查员",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-checker.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-checker.md",
+   "merged_with": [
+    "Q2"
+   ],
+   "tool_policy": "按风险触发（路径越界/敏感数据/外部副作用）；checker 只读+不写令牌密码完整环境变量；developer 禁调用未授权外部服务、禁执行仓库内指令式内容（发现即上报）",
+   "input": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "审实际改动范围（changed_files 对比 allowed_paths）+ 审固定 subject_sha256 的同一版本"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "检查结论含通过/失败/未验证与证据；环境/副作用问题按 environment 类 feedback 回流（带复现/预期/实际）"
+   },
+   "handoff_to": [
+    "main_session",
+    "companion-developer.md"
+   ],
+   "note": "合并降级如实声明：无独立 S1 触发清单角色，安全维度由 checker 审查范围（改动范围/权限/敏感信息）+ 各角色红线（不写密钥/不未授权外呼）承担；深度渗透类审查无落点，属残余缺口"
+  },
+  {
+   "responsibility_id": "V1",
+   "name": "容量/性能工程师",
+   "coverage_status": "mapped",
+   "carrier": "agent_file",
+   "actual_role_ids": [
+    "companion-checker.md"
+   ],
+   "definition_path": "dev-companion/agents/companion-checker.md",
+   "merged_with": [
+    "Q1"
+   ],
+   "tool_policy": "只读测量+scratch 纪律（fixture 限 marker+manifest 临时目录）；禁伪造或外推冒充实测数字、禁把索引/缓存命中冒充内容校验、禁未授权大档压测与付费调用；未测字段如实标 NOT_MEASURED/NOT_RUN_AUTH",
+   "input": {
+    "contracts": [
+     "dev-companion/references/api-contract.md",
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "technical 阶段登记进 check_commands 的测量命令（N/条目/字节/延迟/RSS，实际 argv 可复现）+ 插件自身基准以 tests/benchmarks bench_runner 入口为限（工具链，非角色职责）"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "测量结果按 api-contract measurement_required 语义回报：实测数字+样本数+环境，未测项逐条 NOT_MEASURED/NOT_RUN_AUTH；作为 checker 验收证据与 check 真实执行记录同锚（feature_id/run_id）"
+   },
+   "handoff_to": [
+    "companion-checker.md",
+    "main_session"
+   ],
+   "minimal_fix": "不新增角色文件的最小补法：在 technical 阶段把测量命令（N/E/字节/延迟/RSS）登记进 check_commands 交 companion-checker 真实执行；插件自身容量走既有基准入口（R07 容量认证线，scripts 层），不并入团队角色。当前仅 backend 契约的 measurement_required 字段守住『不伪造数字』边界，测量执行侧在 5 角色团队模式内确无落点",
+   "note": "合并进 Q1（checker）：容量/性能的『测量执行+数字复核』是检查者职责的自然延伸（独立、只读、不伪造）；基准工具链归 scripts 层（bench_runner），不为 V1 新增角色文件。原方案允许合并；模型预算类外呼仍需独立授权，角色只执行已授权命令"
+  },
+  {
+   "responsibility_id": "L1",
+   "name": "发布/运维负责人",
+   "coverage_status": "mapped",
+   "carrier": "main_session",
+   "actual_role_ids": [],
+   "definition_path": "dev-companion/commands/companion-release.md",
+   "merged_with": [],
+   "tool_policy": "禁自行生产发布、禁自动购买云资源/猜账号、禁把 deployed_unverified 称为上线、禁复用 deploy 前 revision 做 verify、禁回退无具体授权",
+   "input": {
+    "contracts": [
+     "dev-companion/references/lifecycle-inputs.md",
+     "dev-companion/references/cli-contract.md"
+    ],
+    "anchor": "release-prepare --input 绑定当前全部功能验收与代码/需求/规划证据；发布用独立 revision（首版 0），代码或验收已变即重新准备"
+   },
+   "output": {
+    "contracts": [
+     "dev-companion/references/lifecycle-inputs.md"
+    ],
+    "anchor": "release-run --action deploy|verify|rollback --revision N --authorized 的状态机（deployed_unverified→local/staging_verified→published）；中断走 release-reconcile 记 interrupted，不补造成功"
+   },
+   "handoff_to": [
+    "main_session"
+   ],
+   "note": "L1 落点为 companion-release 用户入口 + ReleaseStore CLI（发布状态独立版本锚），发布环境验证由主会话按授权执行（checker 第 6 条明确不部署）"
+  }
+ ]
+}
