@@ -1,13 +1,17 @@
 """Explicitly authorized release commands and their local evidence (stdlib only)."""
-import copy
-import json
 import os
-import tempfile
+import sys
 import uuid
 
-from core import CompanionError, now, read_json, run_argv, text
+import kernel_bootstrap  # noqa: F401 — P2-05 单处引导：优先本目录 _kernel_vendor，回退仓库 packages/
+
+
+from agents_kernel.atomicio import read_json, write_json
+from agents_kernel.process import now, run_argv
+from agents_kernel.validation import CompanionError, text
 
 TIMEOUT_SECONDS = 120
+TIMEOUT_ENV = "DEV_COMPANION_CHECK_TIMEOUT"
 ACTIVE = {"deploying", "verifying", "rolling_back"}
 STATUSES = ACTIVE | {"prepared", "deployed_unverified", "deploy_failed", "verify_failed",
                      "local_verified", "staging_verified", "published", "rolled_back_unverified", "rollback_failed", "interrupted"}
@@ -30,8 +34,27 @@ def validate_config(raw):
             if (not isinstance(argv, list) or not argv or
                     any(not isinstance(arg, str) or not arg.strip() or "\0" in arg for arg in argv)):
                 raise CompanionError(key + "中的每条命令必须是非空 argv 数组")
-        config[key] = copy.deepcopy(commands)
+        config[key] = commands  # raw 为调用方刚解析的 JSON 且不被保留，无需快照隔离
     return config
+
+
+def check_timeout():
+    """Z27尾：发布/检查命令超时可按用例经环境变量配置，缺省保持兼容值 120。
+
+    非法值（非正整数，含 0/负数/小数文本）回退默认并向 stderr 警告；空值视为未设置。
+    core.py 的项目检查超时（run_argv 调用处）待 P5 接线同一入口。
+    """
+    raw = os.environ.get(TIMEOUT_ENV)
+    if raw is None or not raw.strip():
+        return TIMEOUT_SECONDS
+    try:
+        value = int(raw)
+        if value <= 0:
+            raise ValueError(raw)
+    except ValueError:
+        print("警告：%s=%r 不是正整数，回退默认超时 %s 秒" % (TIMEOUT_ENV, raw, TIMEOUT_SECONDS), file=sys.stderr)
+        return TIMEOUT_SECONDS
+    return value
 
 
 class ReleaseStore:
@@ -101,18 +124,8 @@ class ReleaseStore:
         record["updated_at"] = now()
         record["history"].append({"revision": record["revision"], "at": record["updated_at"],
                                   "version": record["config"]["version"], "status": record["status"], **event})
-        fd, temporary = tempfile.mkstemp(prefix="release-", suffix=".tmp", dir=str(self.project.data))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(record, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            self._check_paths()
-            os.replace(temporary, self.path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        # before_replace 保留原有的"写入后、替换前"再核查路径语义。
+        write_json(self.path, record, prefix="release-", suffix=".tmp", before_replace=self._check_paths)
 
     def _current(self, view=None):
         from journey import Journey
@@ -121,6 +134,8 @@ class ReleaseStore:
             view = self.project.status(include_release=False, snapshot=snapshot)
         fingerprint = view.get("source_fingerprint")
         if not fingerprint:
+            if not self.project.state_path.exists() and not self.project.state_path.is_symlink():
+                raise CompanionError("state.json 缺失，无法计算发布来源指纹；发布记录仍在，请先恢复 state.json 再操作发布")
             raise CompanionError("发布来源缺少项目文件指纹")
         context = Journey(self.project).context()
         binding = {"scope_version": view["scope_version"], "fingerprint": fingerprint,
@@ -158,8 +173,9 @@ class ReleaseStore:
             return self.status()
 
     def _execute(self, argv):
-        return run_argv(argv, self.project.root, TIMEOUT_SECONDS,
-                        "命令超时（%s秒）；必须核对目标环境和残留进程" % TIMEOUT_SECONDS)
+        timeout = check_timeout()
+        return run_argv(argv, self.project.root, timeout,
+                        "命令超时（%s秒）；必须核对目标环境和残留进程" % timeout)
 
     def run(self, action, revision, authorized=False):
         if action not in {"deploy", "verify", "rollback"}:

@@ -1,0 +1,1333 @@
+{
+ "generated_at": "2026-09-20T15:57:59Z",
+ "suite": "R05 status L 档真实 CLI 实测",
+ "env": {
+  "head_sha": "1d648d9662a3f79d6d5752d67eceed482cd35cfa",
+  "branch": "optimization-v1",
+  "python": "3.9.6",
+  "sqlite": "3.51.0",
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "ram_bytes": 17179869184,
+  "tmp_volume_free_bytes": 76419584000,
+  "cpu_count": 10
+ },
+ "checks": [
+  {
+   "id": "L-init-confirm-exit0",
+   "expected": "init/confirm 在 10 万文件项目上可用（不扫源码）",
+   "observed": {
+    "init_exit": 0,
+    "confirm_exit": 0
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "L-status-exit0-paused-unavailable",
+   "expected": "exit 0 且 capacity_status=paused、fingerprint_status=unavailable、进度不冒充",
+   "observed": {
+    "exit": 0,
+    "capacity_status": "paused",
+    "fingerprint_status": "unavailable",
+    "source_fingerprint": null,
+    "overall_percent": null
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "L-status-zero-source-reads",
+   "expected": "源码树 open/scandir 计数=0、内容读取=0（R05 验收）",
+   "observed": {
+    "open": 0,
+    "scandir": 0,
+    "walk": 0,
+    "read_bytes": 0
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "L-write-path-still-hard-fails",
+   "expected": "超限项目写路径仍硬拒绝（降级只作用于只读展示，不伪通过）",
+   "observed": {
+    "exit": 2,
+    "stderr_head": "{\"success\": false, \"error\": \"项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）\", \"state\": \"unknown_or_unchanged\"}\n"
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "small-accepted-normal-path",
+   "expected": "低于阈值：accepted=1、progress=100（快照路径）",
+   "observed": {
+    "accepted": 1,
+    "overall_percent": 100
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "small-snapshot-path-source-reads-happen",
+   "expected": "低于阈值走快照路径：源码树内容读取发生（如实记录阈值语义）",
+   "observed": {
+    "read_bytes": 56406,
+    "open": 51
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "small-degraded-historical-acceptance-display",
+   "expected": "超限后：accepted 不计数、状态降 awaiting_review、验收记录仍展示、历史事件保留",
+   "observed": {
+    "accepted_count": 0,
+    "feature_status": "awaiting_review",
+    "acceptance_note": "真实检查通过",
+    "has_accepted_event": true,
+    "capacity_status": "paused"
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "team-task-120-writes",
+   "expected": "120 次 team-task CLI 写入全部成功",
+   "observed": {
+    "failures": 0
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "team-status-pagination-cli",
+   "expected": "CLI 分页：首页 100 条、has_more=True、次页 20 条且与首页不重叠",
+   "observed": {
+    "page1_tasks": 100,
+    "page1_has_more": true,
+    "page2_tasks": 20
+   },
+   "result": "PASS"
+  },
+  {
+   "id": "team-status-zero-source-reads",
+   "expected": "team-status 对存在源码树的项目零源码树读取（事实库经 sqlite3.connect）",
+   "observed": {
+    "source_open": 0,
+    "source_scandir": 0,
+    "source_read_bytes": 0,
+    "facts_sqlite_connects": 1
+   },
+   "result": "PASS"
+  }
+ ],
+ "fixtures": [
+  {
+   "tag": "L",
+   "files": 100000,
+   "reused_existing": true,
+   "dir": "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05L",
+   "manifest_sha256": "41c935b4dbfc1290f4db3267606e623ee4fb2781bf0d744912b74dcc8ef97a04",
+   "manifest": {
+    "marker": "BENCHMARK_FIXTURE",
+    "created_at": "2026-09-20T15:31:19Z",
+    "seed": 20260920,
+    "requested_files": 100000,
+    "requested_rows": null,
+    "counting": "files",
+    "base_files": 100000,
+    "generations": 0,
+    "layout": {
+     "top_dirs": 100,
+     "sub_dirs": 100,
+     "leaves_total": 10000,
+     "files_per_leaf": 9,
+     "remainder_leaves": 9990,
+     "leaves_with_files": 10000
+    },
+    "small_files": 99990,
+    "big_files": [
+     {
+      "index": 0,
+      "path": "big/blob_00.bin",
+      "bytes": 5242880
+     },
+     {
+      "index": 1,
+      "path": "big/blob_01.bin",
+      "bytes": 12582912
+     },
+     {
+      "index": 2,
+      "path": "big/blob_02.bin",
+      "bytes": 19922944
+     },
+     {
+      "index": 3,
+      "path": "big/blob_03.bin",
+      "bytes": 10485760
+     },
+     {
+      "index": 4,
+      "path": "big/blob_04.bin",
+      "bytes": 17825792
+     },
+     {
+      "index": 5,
+      "path": "big/blob_05.bin",
+      "bytes": 8388608
+     },
+     {
+      "index": 6,
+      "path": "big/blob_06.bin",
+      "bytes": 15728640
+     },
+     {
+      "index": 7,
+      "path": "big/blob_07.bin",
+      "bytes": 6291456
+     },
+     {
+      "index": 8,
+      "path": "big/blob_08.bin",
+      "bytes": 13631488
+     },
+     {
+      "index": 9,
+      "path": "big/blob_09.bin",
+      "bytes": 20971520
+     }
+    ],
+    "total_files": 100000,
+    "total_bytes": 251253664,
+    "inodes_estimate": 110104,
+    "python": "3.9.6",
+    "platform": "darwin",
+    "generation_seconds": 19.029
+   },
+   "dry_run_line": "DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05L files=100000 small=99990 big=10 bytes=251253664 (239.6MiB) inodes=110104 free=76419547136 (71.2GiB) limit=2147483648"
+  },
+  {
+   "tag": "small",
+   "files": 48,
+   "reused_existing": true,
+   "dir": "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05small",
+   "manifest_sha256": "5fa04cd75452a289d2549ca82af525336c5c77867be911575f20c30e2349ba5b",
+   "manifest": {
+    "marker": "BENCHMARK_FIXTURE",
+    "created_at": "2026-09-20T15:31:19Z",
+    "seed": 20260920,
+    "requested_files": 48,
+    "requested_rows": null,
+    "counting": "files",
+    "base_files": 48,
+    "generations": 0,
+    "layout": {
+     "top_dirs": 100,
+     "sub_dirs": 100,
+     "leaves_total": 10000,
+     "files_per_leaf": 0,
+     "remainder_leaves": 48,
+     "leaves_with_files": 48
+    },
+    "small_files": 48,
+    "big_files": [],
+    "total_files": 48,
+    "total_bytes": 55662,
+    "inodes_estimate": 100,
+    "python": "3.9.6",
+    "platform": "darwin",
+    "generation_seconds": 0.022
+   },
+   "dry_run_line": "DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05small files=48 small=48 big=0 bytes=55662 (0.1MiB) inodes=100 free=76419543040 (71.2GiB) limit=2147483648"
+  },
+  {
+   "tag": "team",
+   "files": 48,
+   "reused_existing": true,
+   "dir": "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05team",
+   "manifest_sha256": "90e32230ed98dcc36581011959f041f601769512f0338057308384778cb725d1",
+   "manifest": {
+    "marker": "BENCHMARK_FIXTURE",
+    "created_at": "2026-09-20T15:31:19Z",
+    "seed": 20260920,
+    "requested_files": 48,
+    "requested_rows": null,
+    "counting": "files",
+    "base_files": 48,
+    "generations": 0,
+    "layout": {
+     "top_dirs": 100,
+     "sub_dirs": 100,
+     "leaves_total": 10000,
+     "files_per_leaf": 0,
+     "remainder_leaves": 48,
+     "leaves_with_files": 48
+    },
+    "small_files": 48,
+    "big_files": [],
+    "total_files": 48,
+    "total_bytes": 55662,
+    "inodes_estimate": 100,
+    "python": "3.9.6",
+    "platform": "darwin",
+    "generation_seconds": 0.012
+   },
+   "dry_run_line": "DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05team files=48 small=48 big=0 bytes=55662 (0.1MiB) inodes=100 free=76419497984 (71.2GiB) limit=2147483648"
+  }
+ ],
+ "l_instrumented_status": {
+  "argv": [
+   "/Library/Developer/CommandLineTools/usr/bin/python3",
+   "/Users/youxididai/Documents/cj/agents/dev-companion/scripts/companion.py",
+   "--project",
+   "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05L",
+   "status",
+   "--format",
+   "json"
+  ],
+  "exit": 0,
+  "counts": {
+   "facts": {
+    "open_calls": 2,
+    "open_fd_calls": 2,
+    "read_calls": 2,
+    "read_bytes": 1944,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 7,
+    "lstat_calls": 8,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "source_tree": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 1,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "plugin": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 1,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "runtime": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 324,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   }
+  },
+  "walk_tops_detail": {
+   "plugin": [],
+   "runtime": [],
+   "source_tree": [],
+   "facts": []
+  },
+  "view_fields": {
+   "capacity_status": "paused",
+   "fingerprint_status": "unavailable",
+   "source_fingerprint": null,
+   "overall_percent": null,
+   "publication": "项目超出当前检查上限；发布核验暂停，建立索引后才能核验",
+   "next_step": "项目文件超出当前检查上限（单文件20MiB，总量100MiB，10000文件）；进度与验收核验已暂停，请先为项目建立文件索引或减小规模后重试；若项目已缩小，删除 .dev-companion/capacity-verdict.json 可重新测量",
+   "counts": {
+    "pending": 1,
+    "running": 0,
+    "awaiting_review": 0,
+    "accepted": 0,
+    "blocked": 0
+   },
+   "revision": 2
+  }
+ },
+ "l_status_timings": {
+  "n": 30,
+  "p50_s": 0.036396,
+  "p95_s": 0.042387,
+  "min_s": 0.033628,
+  "max_s": 0.044916,
+  "mean_s": 0.037013,
+  "rss_peak_max_bytes": 16580608,
+  "raw": [
+   {
+    "seconds": 0.036285,
+    "exit": 0,
+    "rss_peak": 16171008,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.03499,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.034759,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.035965,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.040686,
+    "exit": 0,
+    "rss_peak": 16334848,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036241,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036424,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036149,
+    "exit": 0,
+    "rss_peak": 16171008,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.035152,
+    "exit": 0,
+    "rss_peak": 16498688,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036406,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037139,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037003,
+    "exit": 0,
+    "rss_peak": 16171008,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036396,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.03641,
+    "exit": 0,
+    "rss_peak": 16154624,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037071,
+    "exit": 0,
+    "rss_peak": 16187392,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.035366,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.035195,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.044916,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036929,
+    "exit": 0,
+    "rss_peak": 16171008,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.041845,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036517,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.036946,
+    "exit": 0,
+    "rss_peak": 16564224,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.042387,
+    "exit": 0,
+    "rss_peak": 16580608,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.042151,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.034771,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.034977,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.034186,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.039461,
+    "exit": 0,
+    "rss_peak": 16203776,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.034053,
+    "exit": 0,
+    "rss_peak": 16220160,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.033628,
+    "exit": 0,
+    "rss_peak": 16187392,
+    "rss_unit": "bytes",
+    "stdout_bytes": 3393,
+    "stderr_bytes": 0
+   }
+  ],
+  "argv": [
+   "/Library/Developer/CommandLineTools/usr/bin/python3",
+   "/Users/youxididai/Documents/cj/agents/dev-companion/scripts/companion.py",
+   "--project",
+   "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05L",
+   "status",
+   "--format",
+   "json"
+  ]
+ },
+ "startup_control": {
+  "n": 30,
+  "p50_s": 0.01134,
+  "p95_s": 0.016073,
+  "min_s": 0.010602,
+  "max_s": 0.02606,
+  "mean_s": 0.011979,
+  "rss_peak_max_bytes": 8650752,
+  "raw": [
+   {
+    "seconds": 0.010787,
+    "exit": 0,
+    "rss_peak": 8486912,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011103,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011562,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011287,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.010864,
+    "exit": 0,
+    "rss_peak": 8634368,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.010722,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011004,
+    "exit": 0,
+    "rss_peak": 8552448,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011079,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.012162,
+    "exit": 0,
+    "rss_peak": 8617984,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.010719,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.010602,
+    "exit": 0,
+    "rss_peak": 8503296,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011004,
+    "exit": 0,
+    "rss_peak": 8486912,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.01121,
+    "exit": 0,
+    "rss_peak": 8470528,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.010673,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.010795,
+    "exit": 0,
+    "rss_peak": 8486912,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011467,
+    "exit": 0,
+    "rss_peak": 8503296,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011386,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.02606,
+    "exit": 0,
+    "rss_peak": 8486912,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.016073,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011363,
+    "exit": 0,
+    "rss_peak": 8552448,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011568,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.01174,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011578,
+    "exit": 0,
+    "rss_peak": 8503296,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011672,
+    "exit": 0,
+    "rss_peak": 8536064,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011169,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.012238,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011382,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.012864,
+    "exit": 0,
+    "rss_peak": 8650752,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.01134,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.011898,
+    "exit": 0,
+    "rss_peak": 8519680,
+    "rss_unit": "bytes",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0
+   }
+  ],
+  "argv": [
+   "/Library/Developer/CommandLineTools/usr/bin/python3",
+   "-c",
+   "pass"
+  ]
+ },
+ "small_instrumented_status_snapshot_path": {
+  "argv": [
+   "/Library/Developer/CommandLineTools/usr/bin/python3",
+   "/Users/youxididai/Documents/cj/agents/dev-companion/scripts/companion.py",
+   "--project",
+   "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05small",
+   "status",
+   "--format",
+   "json"
+  ],
+  "exit": 0,
+  "counts": {
+   "facts": {
+    "open_calls": 2,
+    "open_fd_calls": 2,
+    "read_calls": 2,
+    "read_bytes": 9826,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 9,
+    "lstat_calls": 10,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "source_tree": {
+    "open_calls": 51,
+    "open_fd_calls": 0,
+    "read_calls": 51,
+    "read_bytes": 56406,
+    "scandir_calls": 50,
+    "walk_calls": 1,
+    "stat_calls": 154,
+    "lstat_calls": 149,
+    "sqlite_connects": 0,
+    "walk_tops": 1
+   },
+   "plugin": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 1,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "runtime": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 324,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   }
+  }
+ },
+ "small_degraded_after_accept": {
+  "exit": 0,
+  "counts": {
+   "facts": {
+    "open_calls": 2,
+    "open_fd_calls": 2,
+    "read_calls": 2,
+    "read_bytes": 9826,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 8,
+    "lstat_calls": 8,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "source_tree": {
+    "open_calls": 2,
+    "open_fd_calls": 0,
+    "read_calls": 2,
+    "read_bytes": 178,
+    "scandir_calls": 1,
+    "walk_calls": 1,
+    "stat_calls": 9,
+    "lstat_calls": 4,
+    "sqlite_connects": 0,
+    "walk_tops": 1
+   },
+   "plugin": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 1,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "runtime": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 324,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   }
+  },
+  "view_fields": {
+   "capacity_status": "paused",
+   "fingerprint_status": "unavailable",
+   "overall_percent": null
+  },
+  "feature_status": "awaiting_review",
+  "acceptance_retained": {
+   "at": "2026-09-20T15:58:04+00:00",
+   "note": "真实检查通过",
+   "user_confirmed": false,
+   "verification_id": "40a025fd252c43da9e04a67c48145e7d"
+  },
+  "history_kinds": [
+   "scope_drafted",
+   "scope_confirmed",
+   "dispatched",
+   "worker_reported",
+   "checked",
+   "accepted"
+  ]
+ },
+ "team_instrumented_status": {
+  "argv": [
+   "/Library/Developer/CommandLineTools/usr/bin/python3",
+   "/Users/youxididai/Documents/cj/agents/dev-companion/scripts/companion.py",
+   "--project",
+   "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05team",
+   "team-status",
+   "--offset",
+   "0",
+   "--limit",
+   "100"
+  ],
+  "exit": 0,
+  "counts": {
+   "facts": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 2,
+    "lstat_calls": 1,
+    "sqlite_connects": 1,
+    "walk_tops": 0
+   },
+   "source_tree": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 2,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "plugin": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 1,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   },
+   "runtime": {
+    "open_calls": 0,
+    "open_fd_calls": 0,
+    "read_calls": 0,
+    "read_bytes": 0,
+    "scandir_calls": 0,
+    "walk_calls": 0,
+    "stat_calls": 324,
+    "lstat_calls": 0,
+    "sqlite_connects": 0,
+    "walk_tops": 0
+   }
+  }
+ },
+ "team_status_timings": {
+  "n": 30,
+  "p50_s": 0.037894,
+  "p95_s": 0.042038,
+  "min_s": 0.037153,
+  "max_s": 0.064438,
+  "mean_s": 0.039061,
+  "rss_peak_max_bytes": 17416192,
+  "raw": [
+   {
+    "seconds": 0.042038,
+    "exit": 0,
+    "rss_peak": 17235968,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.039212,
+    "exit": 0,
+    "rss_peak": 16957440,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038103,
+    "exit": 0,
+    "rss_peak": 16957440,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037311,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038071,
+    "exit": 0,
+    "rss_peak": 16941056,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037822,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037401,
+    "exit": 0,
+    "rss_peak": 16957440,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037547,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037894,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037864,
+    "exit": 0,
+    "rss_peak": 16908288,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037153,
+    "exit": 0,
+    "rss_peak": 16941056,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037451,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038343,
+    "exit": 0,
+    "rss_peak": 16973824,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037501,
+    "exit": 0,
+    "rss_peak": 16973824,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.064438,
+    "exit": 0,
+    "rss_peak": 17416192,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.03776,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038277,
+    "exit": 0,
+    "rss_peak": 16957440,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.039984,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.039001,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.039137,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037642,
+    "exit": 0,
+    "rss_peak": 16941056,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038456,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038361,
+    "exit": 0,
+    "rss_peak": 16924672,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037559,
+    "exit": 0,
+    "rss_peak": 16891904,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037929,
+    "exit": 0,
+    "rss_peak": 17268736,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037696,
+    "exit": 0,
+    "rss_peak": 16990208,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038241,
+    "exit": 0,
+    "rss_peak": 17268736,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037514,
+    "exit": 0,
+    "rss_peak": 16941056,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.037765,
+    "exit": 0,
+    "rss_peak": 16957440,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   },
+   {
+    "seconds": 0.038352,
+    "exit": 0,
+    "rss_peak": 16957440,
+    "rss_unit": "bytes",
+    "stdout_bytes": 13241,
+    "stderr_bytes": 0
+   }
+  ],
+  "argv": [
+   "/Library/Developer/CommandLineTools/usr/bin/python3",
+   "/Users/youxididai/Documents/cj/agents/dev-companion/scripts/companion.py",
+   "--project",
+   "/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-r05team",
+   "team-status",
+   "--offset",
+   "0",
+   "--limit",
+   "100"
+  ]
+ }
+}

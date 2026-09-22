@@ -1,6 +1,6 @@
 {
   "name": "code-analysis-swarm",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "只读代码分析智能团：结构、架构、依赖、构建与证据复核",
   "commands": "command",
   "agents": "agents"

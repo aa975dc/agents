@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/tmp/fix2-review/agents_bf974a97_recheck_20260921/scripts/probe_concurrency.py", line 47, in <module>
+    a=CTX.Process(target=lock_worker,args=(b,'A',created,rel,ae,end,q));a.start();assert created.wait(5)
+AssertionError

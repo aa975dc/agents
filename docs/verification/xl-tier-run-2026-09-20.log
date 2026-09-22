@@ -1,0 +1,39 @@
+2026-09-20T14:56:29Z
+命令: L_TIER=1 python3 -m unittest tests.benchmarks.test_xl_tier -v   (小样本保守档：800 行/64MiB/4×4 目录；大档 NOT_RUN_AUTH)
+test_count_distinct_current_entries_exact (tests.benchmarks.test_xl_tier.TestStep1_CurrentDistinctAndPhysical)
+current-generation distinct：一轮普查的当前代 distinct 行数精确 == N。 ... ok
+test_dry_run_estimate_recorded (tests.benchmarks.test_xl_tier.TestStep1_CurrentDistinctAndPhysical) ... ok
+test_physical_files_and_bytes_match_manifest (tests.benchmarks.test_xl_tier.TestStep1_CurrentDistinctAndPhysical)
+physical files profile：普通文件数/内容字节与 manifest 逐项一致。 ... ok
+test_generation_count_and_split_accounting (tests.benchmarks.test_xl_tier.TestStep2_HistoryRetentionProfile)
+count_total_rows（累计）与 count_distinct_current_entries 分列且不混同。 ... ok
+test_per_generation_rows_match_controlled_changes (tests.benchmarks.test_xl_tier.TestStep2_HistoryRetentionProfile)
+逐代行数 = 上一代 + 新增 - 删除（受控变更账目逐代可核对）。 ... ok
+test_scan_generations_table_matches_bench (tests.benchmarks.test_xl_tier.TestStep2_HistoryRetentionProfile) ... ok
+test_cross_shard_integrity_and_edges_measured (tests.benchmarks.test_xl_tier.TestStep3_ShardedPaginationNoLossNoDup) ... ok
+test_merged_pagination_full_iteration_matches_oracle (tests.benchmarks.test_xl_tier.TestStep3_ShardedPaginationNoLossNoDup)
+翻页全集 == 逐片直读排序合并：无漏、无重、全局有序。 ... ok
+test_report_paginator_pages_bounded (tests.benchmarks.test_xl_tier.TestStep3_ShardedPaginationNoLossNoDup) ... ok
+test_capacity_result_ledger_emitted (tests.benchmarks.test_xl_tier.TestStep4_PageLatencyAndResultLedger)
+09 §2 字段 JSON：分项分列；未采集字段 NOT_MEASURED；大档 NOT_RUN_AUTH。 ... ok
+test_page100_latency_sampled (tests.benchmarks.test_xl_tier.TestStep4_PageLatencyAndResultLedger)
+首页 100 条 30 次温热 p50/p95：小样本仅记录，不外推为 XL 达标。 ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.917s
+
+OK
+
+XL-TIER-RESULT step1_dry_run {"dry_run": "DRY-RUN OK: target=/private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-xl-70780 files=800 small=798 big=0 bytes=950971 (0.9MiB) inodes=821 free=77122764800 (71.8GiB) limit=67108864 rows_per_gen=[800] rows_total=800 rows_mode=1", "generate": "GENERATED: /private/var/folders/cj/qyl5s28d4fn0lks3x7x7jg1w0000gn/T/benchmark-fixture-xl-70780 (manifest.json + BENCHMARK_FIXTURE)"}
+
+XL-TIER-RESULT step1_profiles {"content_files": 798, "count_distinct_current_entries": 800, "generation_seconds": 0.185, "included_bytes": 950971, "index_db_bytes": 266240, "regular_files": 800, "rows_requested": 800}
+
+XL-TIER-RESULT step2_history {"count_distinct_current_entries": 811, "count_total_rows": 2418, "generations": 3, "per_generation": [{"added": 0, "deleted": 0, "file_count": 800, "generation": 1, "modified": 0, "scan_seconds": 0.015}, {"added": 7, "deleted": 0, "file_count": 807, "generation": 2, "modified": 8, "scan_seconds": 0.016}, {"added": 7, "deleted": 3, "file_count": 811, "generation": 3, "modified": 8, "scan_seconds": 0.015}]}
+
+XL-TIER-RESULT step3_shards {"edges_internal": 794, "edges_unknown": 1599, "file_count": 800, "parsed_files": 798, "shard_count": 5}
+
+XL-TIER-RESULT capacity_09s2 {"content_files": 798, "count_distinct_current_entries": 800, "count_total_rows": 800, "count_total_rows_caliber": "多代累计（工作量口径，≠ 当前代 distinct 条目数）", "edges": 2393, "elapsed_seconds": 0.185, "entries": 800, "events": "NOT_MEASURED", "generation_count": 1, "included_bytes": 950971, "index_db_bytes": 266240, "regular_files": 800, "rows_per_generation": [800], "scale_note": "small-conservative(≤1000 行/64MiB，小样本不外推为容量认证)", "targets_not_executed": {"generations": 1, "reason": "未获资源预算授权（09 §5）；估算见登记文档外推表", "rows": 1000000, "status": "NOT_RUN_AUTH"}, "tasks": "NOT_MEASURED", "tier": "XL"}
+
+XL-TIER-RESULT step4_page100 {"note": "小样本时延不外推为 XL 档 SLO 达标", "p50_s": 0.001298, "p95_s": 0.001757, "page_size": 100, "reps": 30}
+EXIT=0
+2026-09-20T14:56:30Z

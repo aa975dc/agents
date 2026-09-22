@@ -2,7 +2,7 @@
 
 从一句模糊想法开始，用白话讲清产品，经过问答、产品方案、流程、原型和技术设计，再完成编码、联调、测试修复与发布验证。每一步保存成果、决定和未决问题，下次打开可以继续。
 
-这是 ZCode 插件 `dev-companion`，版本 `0.2.0`。包含七个命令、一项共享技能、开发者与独立检查者，以及使用 Python 3.9+ 标准库的本地工具。没有必装 MCP、Hook 或云服务。
+这是 ZCode 插件 `dev-companion`，版本 `0.3.0`。包含七个命令、一项共享技能、两个固定子代理（开发者与独立检查者）加三个按需设计角色（产品、界面、后端），以及使用 Python 3.9+ 标准库的本地工具（`scripts/_kernel_vendor/` 为构建生成的共享内核私有副本）。没有必装 MCP、Hook 或云服务。
 
 ## 从想法到可用产品
 
@@ -28,7 +28,7 @@
 
 1. 准备本仓库的本地副本，确认仓库根目录有 `marketplace.json`。市场目录是仓库根。
 2. 在 ZCode“插件市场 → 添加插件市场”选择该根目录；不同宿主版本的入口文字可能略有差异。
-3. 在该市场安装 `dev-companion` `0.2.0`。已有安装先刷新市场，在插件详情更新，再新建任务验证。修改源码不会自动更新安装副本。
+3. 在该市场安装 `dev-companion` `0.3.0`。已有安装先刷新市场，在插件详情更新，再新建任务验证。修改源码不会自动更新安装副本。
 4. 在目标项目新建任务，在 `/` 菜单选择 `companion-start`，输入：“我想做一个给自己用的记账工具，先帮我说清楚最小版本。”
 
 先看到白话概念卡和少量问题；不需要懂技术或自己写 JSON。可以先保存不完整的想法，逐步补充。已经确认的决定会沿用，需要改变目标、范围、费用或取得尚未获得的执行授权时，再具体说明影响。
@@ -45,7 +45,9 @@
 | `companion-archive` | “保存这些文件”“先预览恢复” | 保存、查看快照，预览并确认恢复 |
 | `companion-resume` | “接着上次继续” | 读取规划、实现、检查、发布与未决事项后续接 |
 
-保留单功能串行开发和独立检查两个角色，不要求每个阶段新增智能体。已有 `code-analysis-swarm` 是可选只读分析插件：小改动定向阅读；陌生大型项目按需使用完整分析团。分析报告不能代替开发或验收。
+保留单功能串行开发和独立检查两个固定角色（轻量模式），不要求每个阶段新增智能体。较大功能可按需启用团队模式的三个设计角色：`companion-product`（需求澄清与范围界定）、`companion-design`（界面设计 brief）、`companion-backend`（接口与数据契约）。它们只在有相应需求时派发，联审不由产出者自审；无相应需求时完全不启用，已有入口与流程不变。全部聊天命令的注册表见仓库 `docs/command-registry.md`（由 `tools/command_registry.py` 自动生成）。
+
+已有 `code-analysis-swarm` 是可选只读分析插件：小改动定向阅读；陌生大型项目按需使用完整分析团。分析报告不能代替开发或验收。
 
 ## 看懂阶段与完成度
 
@@ -87,9 +89,9 @@
 
 需要 ZCode 的文件、进程执行和 Agent 能力。没有独立 Agent 时保留待检查；自动测试无法证明主观体验，CLI 也不是执行沙箱。文件指纹单文件上限 20 MiB、累计 100 MiB、最多 10000 个文件；排除的敏感配置、数据库和外部服务变化需主动记录并重新核验。
 
-实际宿主验证分为清单校验、安装发现、模型执行、完整派发和真实用户试用。这些层次分别记录，不能互相替代。新版的实际结果和待验证范围见 [生命周期实施记录](../docs/dev-companion-lifecycle.md)；旧版记录见 [既有评审](../docs/dev-companion-review.md)。
+实际宿主验证分为清单校验、安装发现、模型执行、完整派发和真实用户试用。这些层次分别记录，不能互相替代。新版的实际结果和待验证范围见 [生命周期实施记录](https://github.com/aa975dc/agents/blob/main/docs/dev-companion-lifecycle.md)；旧版记录见 [既有评审](https://github.com/aa975dc/agents/blob/main/docs/dev-companion-review.md)。
 
-技术接口见 [CLI 约定](references/cli-contract.md)，完整规划与发布输入见 [输入示例](references/lifecycle-inputs.md)，宿主协作见 [ZCode 接入](references/zcode-integration.md)。
+技术接口见 [CLI 约定](references/cli-contract.md)，完整规划与发布输入见 [输入示例](references/lifecycle-inputs.md)，宿主协作见 [ZCode 接入](references/zcode-integration.md)。本目录 `scripts/_kernel_vendor/` 含构建生成的共享内核私有副本，请勿手改：由仓库根 `tools/build_vendor.py` 从 `packages/agents_kernel` 复制并做哈希校验（清单见其 `MANIFEST.json`），插件独立安装（仓库外）时由它提供内核。
 
 ## 体验完整流程
 

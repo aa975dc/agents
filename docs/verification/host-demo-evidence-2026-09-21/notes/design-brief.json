@@ -1,0 +1,100 @@
+{
+  "brief_id": "todo-list-v1",
+  "brief_version": 2,
+  "feature_id": "todo",
+  "based_on": "api 契约 notes/api-contract.json（task-list-api；本 brief 按 v2 修订基线引用：本地 HTTP 服务仅绑定 127.0.0.1、base_url http://127.0.0.1:8765，Task.id 为正整数且同一数据文件内唯一只增不减，数据文件 data/tasks.json 为 {schema, revision, tasks} 包裹对象，GET /api/tasks 按 id 升序返回——新任务出现在列表末尾，POST/PATCH 以 revision 做 CAS，E_PARAM→400 / E_STATE→409 / E_PROJECT→500）。样式语汇仍复用 dev-companion 看板渲染器 render_html（/Users/youxididai/.zcode/cli/plugins/cache/agents-isolated-mkt/dev-companion/0.3.0/scripts/core.py 第 714 行起）的单文件 HTML/CSS 原生语汇：.summary 左侧描边摘要卡、article 卡片、.badge 文字状态徽章、details/summary 折叠说明、CSS 变量与 prefers-color-scheme 深浅色。落地物为单文件 index.html（内嵌原生 JS，经 fetch 调用本地 api，不引入构建链、包管理或第二套框架）加 data/tasks.json（由 api 服务唯一读写，页面不直接写文件）。页面托管方式见 open_questions。",
+  "summary": "为 todo 功能产出单屏设计简报（v2：对齐 api 契约架构，替代 v1 的文件选择器语义）：任务清单页经本地 HTTP 服务（127.0.0.1:8765）读写 data/tasks.json 包裹对象。loading 改为『请求本地服务进行中』；error 对齐 E_PROJECT（文件级）；partial/stale 标注『本架构不可达』并保留五态矩阵占位；Task.id 为正整数；列表按 id 升序、新任务出现在列表末尾；新增空提交双保险（前端拦截＋后端 400 E_PARAM 兜底）与 409 冲突提示（UI 持有 revision，CAS 失败自动重读刷新）验收条。样式仍复用 dev-companion 看板语汇。",
+  "screens": [
+    {
+      "screen_id": "todo-list",
+      "title": "任务清单页（单屏）",
+      "user_flow": [
+        "先启动本地 api 服务（Python 标准库 http.server，127.0.0.1:8765，数据文件 data/tasks.json），浏览器打开单文件 index.html",
+        "页面加载即 GET /api/tasks，取得 revision 与全量任务列表（按 id 升序）；请求返回前显示 loading 态",
+        "在输入框输入任务文本，回车或点击添加按钮：前端 trim 校验通过后 POST /api/tasks（携带 expected_revision）；trim 后为空则前端拦截不发起请求（双保险第一层，后端 400 E_PARAM 兜底）",
+        "点击任务行复选框：PATCH /api/tasks/{id}（携带 done 与 expected_revision）切换完成/未完成（回退语义按契约默认：completed_at 复位 null，见 open_questions）",
+        "收到 409 E_STATE 时：顶部提示条出现冲突文案，页面自动重新 GET /api/tasks 刷新列表与 revision，不自动重放失败的写请求",
+        "刷新页面重新 GET 即验证持久化（数据在 data/tasks.json，服务进程是唯一写者，页面不直接写文件）"
+      ],
+      "states": {
+        "loading": {
+          "data": "请求本地服务进行中：页面已打开，对 127.0.0.1:8765 的 GET /api/tasks 尚未返回，任务数组与 revision 均未知。非文件选择器语义，无虚构进度条",
+          "copy": "正在连接本地服务（127.0.0.1:8765）…",
+          "shown": ["顶部提示条"]
+        },
+        "empty": {
+          "data": "GET /api/tasks 返回 tasks=[]、count=0（data/tasks.json 包裹对象中 tasks 数组为空）",
+          "copy": "还没有任务：在输入框输入内容并回车，添加第一条任务",
+          "shown": ["摘要卡", "输入表单行", "空态引导文案"]
+        },
+        "error": {
+          "data": "服务返回 HTTP 500 E_PROJECT（文件级错误）：data/tasks.json 无法解析或 schema 不符，无法读写。此态下页面不得发起任何写请求",
+          "copy": "数据文件读取失败（E_PROJECT）：『服务返回原因原文』。数据未被修改，请修复 data/tasks.json 后刷新页面",
+          "shown": ["顶部提示条"]
+        },
+        "partial": {
+          "data": "本架构不可达（降级说明，保留占位）：api 在服务端校验 title（trim 后非空），GET 全量返回的 Task 字段由契约保证完整（id 正整数、title 字符串、done 布尔），客户端不会收到『部分合法部分非法』的数组。若未来契约放开服务端校验，须递增 contract_version 并回改本态",
+          "copy": "（当前架构不可达）如启用：共 N 条任务，其中 M 条数据异常，已原样保留；其余照常显示",
+          "shown": ["顶部提示条"]
+        },
+        "success": {
+          "data": "GET /api/tasks 返回合法 Task 数组：每项含 id（正整数）、title（字符串）、done（布尔）、created_at 与 completed_at（UTC ISO-8601 字符串，未完成为 null）；列表按 id 升序；页面持有当前 revision，用于后续写请求的 expected_revision",
+          "copy": "共 X 项，已完成 Y 项",
+          "shown": ["摘要卡", "输入表单行", "任务列表", "状态徽章", "折叠说明"]
+        },
+        "stale": {
+          "data": "本架构不可达（由 409 冲突流程取代，降级说明，保留占位）：服务进程是唯一写者并以 revision 做 CAS，页面外直接改 data/tasks.json 不在契约内；并发写冲突表现为写请求返回 409 E_STATE，由『冲突提示』交互处理（提示＋自动重读刷新，见 user_flow）。本 brief 不设计轮询/推送，『页面持有数据落后于服务』不作为独立可见态；若未来契约增加轮询/推送，须递增 contract_version 并回改本态",
+          "copy": "（当前架构不可达，冲突场景见 409 冲突提示行为）如启用：数据已有更新，请刷新以获取最新内容",
+          "shown": ["顶部提示条"]
+        }
+      },
+      "non_applicable_states": "unauthorized 不适用：api 仅绑定 127.0.0.1、契约声明无鉴权，本地单用户无未授权场景；partial/stale 在本架构不可达，保留五态占位并标注（见 states）",
+      "components": [
+        {"name": "摘要卡", "reuse": "既有 .summary 词汇（core.py render_html：左侧描边卡片，CSS 变量 --card/--line/--blue）", "states": "success/empty 出现，显示『共 X 项，已完成 Y 项』"},
+        {"name": "输入表单行", "reuse": "新组件（最小说明）：原生 form + input[type=text] + button[type=submit]，描边与圆角沿用既有卡片变量，占位文案『添加任务，回车确认』；提交前 trim 校验：trim 后为空则不发起 POST，输入框保留原值并出现行内提示『任务内容不能为空』（双保险第一层；后端 400 E_PARAM 兜底）", "states": "success/empty 出现"},
+        {"name": "任务列表", "reuse": "新组件（最小说明）：纵向单列的既有 article 卡片样式列表，每行为原生 checkbox + 任务文本 + 状态徽章；行序按 id 升序，新任务（id 最大）出现在列表末尾", "states": "success 出现；empty 不出现（以空态引导文案代替）"},
+        {"name": "状态徽章", "reuse": "既有 .badge 胶囊徽章，文字即状态中文名（进行中/已完成），颜色仅辅助、不单独靠颜色区分", "states": "success 出现"},
+        {"name": "顶部提示条", "reuse": "新组件（最小说明）：复用 .summary 描边样式的横条，用于 loading/error 文案与 409 冲突提示文案（『数据已被其他操作更新，已自动刷新』）", "states": "loading/error 出现；409 冲突时出现"},
+        {"name": "折叠说明", "reuse": "既有 details/summary 原生元素，显示数据来源（api base_url 与 data/tasks.json 路径）、当前 revision 与排序说明（按 id 升序）", "states": "success 出现"},
+        {"name": "空态引导文案", "reuse": "新组件（最小说明）：既有正文段落样式（--muted 色文字），仅文案", "states": "empty 出现"},
+        {"name": "深浅色", "reuse": "既有 CSS 变量与 prefers-color-scheme 覆盖", "states": "全部状态"}
+      ],
+      "responsive": {
+        "desktop": "main 最大宽度 640px 居中，任务列表纵向单列，摘要卡全宽",
+        "narrow": "视口 320px 时任务列表仍为单列，输入框与按钮不产生横向滚动"
+      },
+      "accessibility": [
+        "html 标注 lang=zh-CN",
+        "完成状态由复选框 checked 与文字徽章共同承载，不单独靠颜色区分",
+        "添加表单与复选框均为原生元素：Tab 可到达、空格可切换复选框、回车提交表单",
+        "每个复选框通过 label 与任务文本关联，点击文本同样可切换",
+        "深浅两套配色正文对比度均不低于 4.5:1"
+      ],
+      "acceptance_criteria": [
+        "启动本地服务后浏览器打开 index.html，页面加载完成后出现标题『任务清单』，且 html 标签 lang 属性等于 zh-CN",
+        "data/tasks.json 的 tasks 数组为空数组时刷新页面，摘要卡出现『共 0 项，已完成 0 项』，列表区域不出现任务行，输入表单可见",
+        "在输入框输入『买牛奶』并回车，列表末尾出现文本等于『买牛奶』的任务行（列表按 id 升序、新任务 id 最大居末），行内状态徽章文字等于『进行中』，输入框内容等于空字符串，且 data/tasks.json 的 tasks 数组中该条目 id 为正整数、done 等于 false",
+        "点击『买牛奶』行的复选框后，该行徽章文字等于『已完成』，摘要卡出现『已完成 1 项』，且 data/tasks.json 中该条目 done 字段等于 true、completed_at 字段不等于 null",
+        "刷新页面（重新 GET /api/tasks）后，列表出现『买牛奶』且徽章文字等于『已完成』，且列表顺序与刷新前一致（按 id 升序排列，新任务始终在列表末尾，不随刷新改变）",
+        "在输入框输入纯空格并回车：列表区域不出现新任务行（摘要卡项数文案等于提交前），输入框内容不等于空字符串（原值保留），页面出现包含『不能为空』的提示，且磁盘 data/tasks.json 内容等于提交前内容；即便请求绕过前端拦截被直接发出，服务端契约也以 HTTP 400 E_PARAM 拒绝，列表同样不出现新任务行",
+        "将 data/tasks.json 内容改为非法 JSON 后刷新页面，页面出现包含『读取失败』的错误提示，且磁盘文件字节内容等于改坏后的原文（页面不写文件，修复后刷新页面错误提示不再出现）",
+        "页面打开期间，用另一客户端（如 curl）携带最新 revision 成功 POST 一条任务后，在页面点击任一任务复选框：顶部提示条出现包含『已被其他操作更新』的冲突文案，且随后列表出现该外部新增的任务行（页面已自动重读刷新列表与 revision）",
+        "窗口宽度缩到 320px 时，任务列表保持单列且页面不出现横向滚动条",
+        "仅用 Tab 键，焦点至少依次到达输入框、添加按钮、第一个任务复选框；复选框获得焦点后按空格键可切换完成状态",
+        "系统深色与浅色两种模式下，正文文字与背景对比度均不低于 4.5:1",
+        "已完成任务行至少同时出现两项完成标识：复选框 checked 状态与文字徽章『已完成』，不单独靠颜色传达"
+      ]
+    }
+  ],
+  "non_goals": [
+    "多用户与云同步（idea.md 明确排除；api 仅绑定 127.0.0.1，无鉴权与授权场景，unauthorized 不适用）",
+    "不引入构建链、包管理或第二套 CSS 框架；仍为纯 HTML/CSS（含内嵌原生 JS）单文件 index.html，经 fetch 调用本地 api",
+    "任务编辑、删除、撤销、拖拽排序、截止日期、提醒——均未在已确认范围（idea.md 仅确认添加任务与勾选完成）",
+    "不设计多标签页实时同步或冲突自动合并：并发写以 409 E_STATE 冲突提示＋自动重读刷新覆盖",
+    "不设计轮询/推送刷新：partial 与 stale 在本架构不可达，仅保留五态占位与不可达标注（见 states）"
+  ],
+  "open_questions": [
+    "页面托管方式未定（api 契约 open_questions 同项回流）：由本地服务一并托管 index.html，还是浏览器直接打开本地文件再 fetch http://127.0.0.1:8765；两种方式下本 brief 的状态机与验收条均成立，不阻塞设计，选型结果若改变加载语义须递增 brief_version",
+    "已完成任务是否允许取消勾选未定（api 契约默认允许且 completed_at 复位 null，待产品确认）：本 brief 按契约默认设计为可切换复选框；若最终禁止，复选框对已完成任务应禁用，须递增 brief_version 修订交互"
+  ]
+}

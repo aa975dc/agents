@@ -292,7 +292,7 @@ class LifecycleIntegrationTests(unittest.TestCase):
         manifest = json.loads((plugin / ".zcode-plugin" / "plugin.json").read_text())
         marketplace = json.loads((plugin.parent / "marketplace.json").read_text())
         listing = next(item for item in marketplace["plugins"] if item["name"] == "dev-companion")
-        self.assertEqual(manifest["version"], "0.2.0")
+        self.assertEqual(manifest["version"], "0.3.0")
         self.assertEqual(listing["version"], manifest["version"])
         self.assertEqual(listing["source"], "./dev-companion")
         self.assertEqual(manifest["commands"], "commands")

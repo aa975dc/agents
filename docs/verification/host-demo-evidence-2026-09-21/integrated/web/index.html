@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务清单</title>
+<style>
+:root {
+  --bg: #f5f5f3;
+  --card: #ffffff;
+  --line: #d9d7d0;
+  --text: #1d1c1a;
+  --muted: #5c5a54;
+  --blue: #2456a6;
+  --green: #1e6b3a;
+  --danger: #a12b21;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161719;
+    --card: #1f2124;
+    --line: #3b3e43;
+    --text: #e9e7e2;
+    --muted: #a9a7a1;
+    --blue: #93b7f5;
+    --green: #7ed09a;
+    --danger: #f0918a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 16px; }
+.notice, .summary {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 12px;
+}
+#state-error { border-left-color: var(--danger); }
+#state-partial { border-left-color: var(--muted); color: var(--muted); }
+form { display: flex; gap: 8px; margin: 0 0 8px; }
+input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+button {
+  flex-shrink: 0;
+  padding: 9px 16px;
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  background: var(--blue);
+  color: var(--bg);
+  font: inherit;
+  cursor: pointer;
+}
+input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); flex-shrink: 0; }
+.inline-error { color: var(--danger); margin: 0 0 12px; }
+.muted { color: var(--muted); }
+#task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.task-line { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }
+.task-title { overflow-wrap: anywhere; }
+.badge {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.badge.done { color: var(--green); border-color: var(--green); }
+details { margin-top: 16px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>任务清单</h1>
+
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <section id="state-loading" class="notice" role="status">正在连接本地服务（127.0.0.1:8765）…</section>
+  <!-- error 态：仅由 HTTP 500 E_PROJECT / 网络不可达触发；此态下页面不发起任何写请求 -->
+  <section id="state-error" class="notice" hidden></section>
+  <!-- partial 态占位：api 在服务端校验 title 且 Task 字段由契约保证完整，本架构不可达，仅保留五态占位 -->
+  <section id="state-partial" class="notice" hidden>（当前架构不可达）如启用：共 <span id="partial-total">N</span> 条任务，其中 <span id="partial-bad">M</span> 条数据异常，已原样保留；其余照常显示</section>
+
+  <section id="state-success" hidden>
+    <div id="summary" class="summary">共 0 项，已完成 0 项</div>
+    <form id="add-form">
+      <input id="title" type="text" placeholder="添加任务，回车确认" aria-label="任务内容">
+      <button type="submit">添加</button>
+    </form>
+    <p id="title-error" class="inline-error" role="alert" hidden></p>
+    <p id="state-empty" class="muted" hidden>还没有任务：在输入框输入内容并回车，添加第一条任务</p>
+    <ul id="task-list"></ul>
+    <details>
+      <summary>数据说明</summary>
+      <p>数据来源：本地服务 http://127.0.0.1:8765 的 /api/tasks，存储于 data/tasks.json（服务进程唯一读写，页面不直接写文件）。当前 revision：<span id="revision-value">-</span>。列表按 id 升序排列，新任务（id 最大）出现在末尾。</p>
+    </details>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var API_BASE = 'http://127.0.0.1:8765';
+  var revision = null;
+  var tasks = [];
+
+  function $(id) { return document.getElementById(id); }
+  var notice = $('notice');
+  var stateLoading = $('state-loading');
+  var stateError = $('state-error');
+  var statePartial = $('state-partial');
+  var stateSuccess = $('state-success');
+  var stateEmpty = $('state-empty');
+  var summary = $('summary');
+  var form = $('add-form');
+  var titleInput = $('title');
+  var titleError = $('title-error');
+  var taskList = $('task-list');
+  var revisionValue = $('revision-value');
+
+  function show(el) { el.hidden = false; }
+  function hide(el) { el.hidden = true; }
+
+  function setNotice(text) {
+    notice.textContent = text;
+    show(notice);
+  }
+  function clearNotice() {
+    hide(notice);
+    notice.textContent = '';
+  }
+
+  // 读取错误响应里的服务端原因原文（body 形状契约未定，尽力解析）
+  async function readReason(res) {
+    try {
+      var body = await res.json();
+      if (body && typeof body.error === 'string' && body.error) return body.error;
+      if (body && typeof body.message === 'string' && body.message) return body.message;
+      return JSON.stringify(body);
+    } catch (e) {
+      try { return (await res.text()).slice(0, 200); } catch (e2) { return 'HTTP ' + res.status; }
+    }
+  }
+
+  async function showFatal(res) {
+    var reason = await readReason(res);
+    stateError.textContent = '数据文件读取失败（E_PROJECT）：『' + reason + '』。数据未被修改，请修复 data/tasks.json 后刷新页面';
+    hide(stateLoading);
+    hide(stateSuccess);
+    show(stateError);
+  }
+
+  function render() {
+    var doneCount = tasks.filter(function (t) { return t.done; }).length;
+    summary.textContent = '共 ' + tasks.length + ' 项，已完成 ' + doneCount + ' 项';
+    taskList.textContent = '';
+    if (tasks.length === 0) {
+      show(stateEmpty);
+      hide(taskList);
+    } else {
+      hide(stateEmpty);
+      show(taskList);
+      tasks.forEach(function (task) {
+        var li = document.createElement('li');
+        li.className = 'task';
+
+        var label = document.createElement('label');
+        label.className = 'task-line';
+        var box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = task.done;
+        box.addEventListener('change', function () { toggleTask(task.id, box.checked); });
+        var text = document.createElement('span');
+        text.className = 'task-title';
+        text.textContent = task.title;
+        label.appendChild(box);
+        label.appendChild(text);
+
+        var badge = document.createElement('span');
+        badge.className = 'badge' + (task.done ? ' done' : '');
+        badge.textContent = task.done ? '已完成' : '进行中';
+
+        li.appendChild(label);
+        li.appendChild(badge);
+        taskList.appendChild(li);
+      });
+    }
+    revisionValue.textContent = String(revision);
+    show(stateSuccess);
+  }
+
+  function applyData(data) {
+    tasks = (data.tasks || []).slice().sort(function (a, b) { return a.id - b.id; });
+    revision = data.revision;
+    render();
+  }
+
+  async function refresh(opts) {
+    var background = opts && opts.background;
+    if (!background) show(stateLoading);
+    hide(stateError);
+    var res;
+    try {
+      res = await fetch(API_BASE + '/api/tasks');
+    } catch (err) {
+      stateError.textContent = '无法连接本地服务（127.0.0.1:8765）：请确认服务已启动后刷新页面';
+      hide(stateLoading);
+      hide(stateSuccess);
+      show(stateError);
+      return;
+    }
+    if (res.status === 500) { await showFatal(res); return; }
+    if (!res.ok) {
+      var reason = await readReason(res);
+      stateError.textContent = '读取失败：本地服务返回 HTTP ' + res.status + '（' + reason + '），请刷新页面重试';
+      hide(stateLoading);
+      hide(stateSuccess);
+      show(stateError);
+      return;
+    }
+    var data = await res.json();
+    applyData(data);
+    if (!background) {
+      hide(stateLoading);
+      clearNotice();
+    }
+  }
+
+  // 409 E_STATE：提示冲突并自动重读刷新，不重放失败的写请求
+  function onConflict() {
+    setNotice('数据已被其他操作更新，已自动刷新');
+    refresh({ background: true });
+  }
+
+  async function addTask(title) {
+    var res;
+    try {
+      res = await fetch(API_BASE + '/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title, expected_revision: revision })
+      });
+    } catch (err) {
+      setNotice('无法连接本地服务，添加失败，请确认服务已启动');
+      return;
+    }
+    if (res.status === 409) { onConflict(); return; }
+    if (res.status === 500) { await showFatal(res); return; }
+    if (res.status === 400) {
+      var reason = await readReason(res);
+      titleError.textContent = '任务内容不能为空（E_PARAM：' + reason + '）';
+      show(titleError);
+      return;
+    }
+    if (!res.ok) { setNotice('添加失败：HTTP ' + res.status); return; }
+    var data = await res.json();
+    revision = data.revision;
+    tasks.push(data.task);
+    tasks.sort(function (a, b) { return a.id - b.id; });
+    titleInput.value = '';
+    render();
+  }
+
+  async function toggleTask(id, done) {
+    var res;
+    try {
+      res = await fetch(API_BASE + '/api/tasks/' + id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ done: done, expected_revision: revision })
+      });
+    } catch (err) {
+      setNotice('无法连接本地服务，操作失败，请确认服务已启动');
+      refresh({ background: true });
+      return;
+    }
+    if (res.status === 409) { onConflict(); return; }
+    if (res.status === 500) { await showFatal(res); return; }
+    if (!res.ok) {
+      setNotice('操作失败：HTTP ' + res.status);
+      refresh({ background: true });
+      return;
+    }
+    var data = await res.json();
+    revision = data.revision;
+    for (var i = 0; i < tasks.length; i++) {
+      if (tasks[i].id === id) { tasks[i] = data.task; break; }
+    }
+    render();
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var raw = titleInput.value;
+    var t = raw.trim();
+    if (!t) {
+      // 双保险第一层：空白提交前端拦截，不发起 POST（后端 400 E_PARAM 兜底）
+      titleError.textContent = '任务内容不能为空';
+      show(titleError);
+      return;
+    }
+    hide(titleError);
+    addTask(t);
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>

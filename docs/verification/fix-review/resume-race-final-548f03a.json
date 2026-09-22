@@ -1,0 +1,20 @@
+{
+  "seed_epoch": 1,
+  "workers": [
+    {
+      "writer": "A",
+      "success": false,
+      "error": "Traceback (most recent call last):\n  File \"/tmp/fix-review/agents_source_review_1a7bc698_20260921/scripts/reproduce_resume_race.py\", line 23, in worker\n    ledger=ResumeLedger.open(root,name)\n  File \"/Users/youxididai/Documents/cj/agents/packages/agents_kernel/services/resume.py\", line 96, in open\n    previous = cls._read(path)\n  File \"/tmp/fix-review/agents_source_review_1a7bc698_20260921/scripts/reproduce_resume_race.py\", line 20, in scheduled_read\n    read_barrier.wait(timeout=10)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/threading.py\", line 635, in wait\n    self._wait(timeout)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/threading.py\", line 673, in _wait\n    raise BrokenBarrierError\nthreading.BrokenBarrierError\n"
+    },
+    {
+      "writer": "B",
+      "success": false,
+      "error": "Traceback (most recent call last):\n  File \"/tmp/fix-review/agents_source_review_1a7bc698_20260921/scripts/reproduce_resume_race.py\", line 23, in worker\n    ledger=ResumeLedger.open(root,name)\n  File \"/Users/youxididai/Documents/cj/agents/packages/agents_kernel/services/resume.py\", line 96, in open\n    previous = cls._read(path)\n  File \"/tmp/fix-review/agents_source_review_1a7bc698_20260921/scripts/reproduce_resume_race.py\", line 20, in scheduled_read\n    read_barrier.wait(timeout=10)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/threading.py\", line 626, in wait\n    self._enter() # Block while the barrier drains.\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/threading.py\", line 650, in _enter\n    raise BrokenBarrierError\nthreading.BrokenBarrierError\n"
+    }
+  ],
+  "final_writer": "seed",
+  "final_epoch": 1,
+  "final_activity_ids": [],
+  "both_acquired_same_epoch": false,
+  "successful_A_activity_lost": true
+}

@@ -1,0 +1,71 @@
+# 分层 CI（Z17 / P1-05）：
+#   layer A 纯逻辑与 mock：Python unittest（含文件系统级用例）+ Node mock/静态守卫
+#   layer C 真实宿主编译/E2E：GitHub 托管 runner 无 ZCode 宿主，不能在此伪造——
+#   按 docs/host-contract/ 与 docs/verification/ 的本机证据人工签收（09 §6）。
+# 本仓库零第三方依赖，无需安装步骤，也不注入任何密钥。
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 是声明的最低版本（README），3.12 验证新解释器；不静默升级最低声明（09 §6）
+        python-version: ["3.9", "3.12"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: unittest (dev-companion + precheck + special files)
+        run: python3 -m unittest discover -s tests -q
+
+  node:
+    strategy:
+      fail-fast: false
+      matrix:
+        # swarm_workflow.test.mjs 依赖 node:module.stripTypeScriptTypes（≥22.13）；
+        # "22" 解析为最新 22.x（≥22.13），"24" 为已验证版本（Z20 以 CI 实测为准）
+        node-version: ["22", "24"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: node:test (workflow mock + host-contract static guard)
+        run: node --test tests/swarm_workflow.test.mjs tests/host/host-contract.test.mjs
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: manifest consistency (marketplace vs plugin.json)
+        run: |
+          python3 - <<'EOF'
+          import json, pathlib, sys
+          root = pathlib.Path(".")
+          mp = json.loads((root / "marketplace.json").read_text())
+          entries = {p["name"]: p for p in mp["plugins"]}
+          failures = []
+          for plugin_dir in ["dev-companion", "code-analysis-swarm"]:
+              pj = json.loads((root / plugin_dir / ".zcode-plugin" / "plugin.json").read_text())
+              entry = entries.get(pj["name"])
+              if entry is None:
+                  failures.append(f"{plugin_dir}: marketplace 缺少 {pj['name']}")
+                  continue
+              if entry.get("version") != pj.get("version"):
+                  failures.append(f"{plugin_dir}: 版本不一致 marketplace={entry.get('version')} plugin.json={pj.get('version')}")
+              source = root / entry["source"].lstrip("./")
+              if not (source / ".zcode-plugin" / "plugin.json").is_file():
+                  failures.append(f"{plugin_dir}: source 路径无效 {entry['source']}")
+          if failures:
+              sys.exit("版本/清单不一致：\n" + "\n".join(failures))
+          print("manifest consistency OK")
+          EOF

@@ -1,0 +1,203 @@
+{
+  "contract_id": "task-list-api-v1",
+  "contract_version": 2,
+  "feature_id": "task-list",
+  "title": "本地任务清单应用接口契约（v2）",
+  "kind": "http",
+  "base_url": "http://127.0.0.1:8765",
+  "transport": "Python 标准库 http.server 起本地服务（零第三方依赖，Python 3.9+），仅绑定 127.0.0.1；端口由启动参数指定，默认 8765。同一服务以同端口托管静态前端：GET / 返回 web/index.html（内嵌 JS 单文件），满足浏览器直接打开",
+  "auth": "无鉴权：仅监听 127.0.0.1 供本机单用户使用；对外暴露或增加鉴权属契约变更，须递增 contract_version 并回流产品角色确认",
+  "storage": {
+    "kind": "本地 JSON 文件（标准库实现，不假设数据库、消息队列或云存储）",
+    "path": "data/tasks.json（相对项目根，可由启动参数覆盖）",
+    "shape": {
+      "schema": 1,
+      "revision": 4,
+      "tasks": "Task 对象数组，字段见 entities"
+    },
+    "invariants": [
+      "revision 为整数，随每次成功写单调递增；读接口原样返回当前值",
+      "写入经临时文件 + os.replace 原子替换；服务进程是唯一写者，绕过接口直接改文件不在契约内",
+      "schema 字段恒为 1；文件无法解析或 schema 不符按 E_PROJECT 处理"
+    ]
+  },
+  "entities": [
+    {
+      "name": "Task",
+      "lifecycle": ["active", "done"],
+      "invariants": [
+        "id 为正整数，同一数据文件内唯一且只增不减",
+        "title 为字符串且 trim 后非空",
+        "created_at 恒存在，UTC ISO-8601 字符串（含 +00:00）",
+        "done=false 时 completed_at=null；done=true 时 completed_at 为 UTC ISO-8601 字符串",
+        "done 可经 PATCH 回退为 active，回退时 completed_at 复位为 null（默认行为，待产品确认，见 open_questions）"
+      ]
+    }
+  ],
+  "field_semantics": [
+    "时间一律 UTC ISO-8601 字符串",
+    "可空字段未知写 null 不写 0 或空串；空列表写 [] 不写 null"
+  ],
+  "error_mapping": "HTTP 状态映射：E_PARAM→400，E_STATE→409，E_PROJECT→500；exit_code 沿用 references/api-contract.md 闭合枚举定义。E_AUTH（本契约无授权门槛）、E_CHECK（无检查/发布命令）在本契约无触发场景，不列入。",
+  "endpoints": [
+    {
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/tasks",
+      "title": "添加任务",
+      "request_example": {
+        "title": "买牛奶",
+        "expected_revision": 3
+      },
+      "request_rules": [
+        "title 必填且 trim 后非空，否则 E_PARAM",
+        "expected_revision 必填整数，取自最近一次读到的 revision；不符报 E_STATE，先重读再重试"
+      ],
+      "response_example": {
+        "revision": 4,
+        "task": {
+          "id": 7,
+          "title": "买牛奶",
+          "done": false,
+          "created_at": "2026-09-21T12:00:00+00:00",
+          "completed_at": null
+        }
+      },
+      "error_codes": [
+        {
+          "code": "E_PARAM",
+          "exit_code": 2,
+          "when": "title 缺失/非字符串/trim 后为空，或 expected_revision 缺失/非整数（HTTP 400）"
+        },
+        {
+          "code": "E_STATE",
+          "exit_code": 2,
+          "when": "expected_revision 与当前 revision 不符（HTTP 409）"
+        },
+        {
+          "code": "E_PROJECT",
+          "exit_code": 2,
+          "when": "数据文件目录缺失或 JSON 损坏/schema 不符，无法读写（HTTP 500）"
+        }
+      ],
+      "idempotency": {
+        "mode": "revision_cas",
+        "key": null,
+        "note": "以列表级 revision 做 CAS：同一请求未重读 revision 就重试时，第二次因 revision 已前进报 E_STATE，不会写入重复任务；客户端重读后重试即可恢复"
+      }
+    },
+    {
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/tasks",
+      "title": "列出任务",
+      "request_example": {},
+      "request_rules": [
+        "无必填参数；可选查询参数 done=true|false 过滤，其他取值报 E_PARAM",
+        "无分页：本地个人规模一次性全量返回；加分页属契约变更须递增 contract_version"
+      ],
+      "response_rules": [
+        "tasks 按 id 升序返回：与追加语义一致（新任务 id 最大，出现在列表末尾）；排序仅由 id 决定、与 done 状态无关，同数据多次调用顺序稳定，刷新后不变"
+      ],
+      "response_example": {
+        "revision": 4,
+        "count": 2,
+        "tasks": [
+          {
+            "id": 6,
+            "title": "交房租",
+            "done": true,
+            "created_at": "2026-09-20T08:00:00+00:00",
+            "completed_at": "2026-09-21T09:30:00+00:00"
+          },
+          {
+            "id": 7,
+            "title": "买牛奶",
+            "done": false,
+            "created_at": "2026-09-21T12:00:00+00:00",
+            "completed_at": null
+          }
+        ]
+      },
+      "error_codes": [
+        {
+          "code": "E_PARAM",
+          "exit_code": 2,
+          "when": "查询参数 done 不是 true/false（HTTP 400）"
+        },
+        {
+          "code": "E_PROJECT",
+          "exit_code": 2,
+          "when": "数据文件 JSON 损坏/schema 不符，无法读取（HTTP 500）"
+        }
+      ],
+      "idempotency": {
+        "mode": "read_only",
+        "key": null,
+        "note": "纯查询，同参数重复调用天然幂等，不产生任何写"
+      }
+    },
+    {
+      "kind": "http",
+      "method": "PATCH",
+      "path": "/api/tasks/{id}",
+      "title": "勾选完成/取消完成",
+      "request_example": {
+        "done": true,
+        "expected_revision": 4
+      },
+      "request_rules": [
+        "路径 {id} 必须是已存在任务的正整数 id，非整数或不存在报 E_PARAM",
+        "done 必填布尔；expected_revision 必填整数，CAS 语义同添加任务"
+      ],
+      "response_example": {
+        "revision": 5,
+        "task": {
+          "id": 7,
+          "title": "买牛奶",
+          "done": true,
+          "created_at": "2026-09-21T12:00:00+00:00",
+          "completed_at": "2026-09-21T12:05:00+00:00"
+        }
+      },
+      "response_rules": [
+        "置 done=true 时写 completed_at（UTC）；回退 done=false 时 completed_at 复位为 null",
+        "done 与当前状态相同时为 no-op：返回原 task 且 revision 不递增"
+      ],
+      "error_codes": [
+        {
+          "code": "E_PARAM",
+          "exit_code": 2,
+          "when": "路径 id 非整数或不存在，done 缺失/非布尔，expected_revision 缺失/非整数（HTTP 400）"
+        },
+        {
+          "code": "E_STATE",
+          "exit_code": 2,
+          "when": "expected_revision 与当前 revision 不符（HTTP 409）"
+        },
+        {
+          "code": "E_PROJECT",
+          "exit_code": 2,
+          "when": "数据文件 JSON 损坏/schema 不符，无法读写（HTTP 500）"
+        }
+      ],
+      "idempotency": {
+        "mode": "revision_cas",
+        "key": null,
+        "note": "以 revision 做 CAS；且对同状态重复勾选为 no-op（revision 不变、返回原 task），重复提交不产生副作用"
+      }
+    }
+  ],
+  "migration_notes": [
+    "首版 v1（contract_id=task-list-api-v1，contract_version=1）：无既有实现与旧数据，breaking=false，无并存期与回退需求",
+    "v1→v2（contract_version 1→2）：新增 GET /api/tasks 排序不变量（tasks 按 id 升序返回）与静态托管注记（同端口托管 web/index.html→/，内嵌 JS 单文件）；无字段、错误码或幂等语义变更，breaking=false，无并存期与回退需求",
+    "后续任何字段、错误码或幂等语义变更必须递增 contract_version 并换新 contract_id，重写本注记并记录受影响的实现与检查"
+  ],
+  "measurement_required": [
+    "接口延迟未实测，本契约不声明任何性能数字；测量方法：本机 curl 对三个端点各计时 100 次（任务数分别为 0/100/1000 条），取中位数",
+    "data/tasks.json 体积随任务数的增长未实测；测量方法：批量插入 1000 条后记录文件字节数"
+  ],
+  "open_questions": [
+    "已完成任务是否允许取消勾选：契约默认允许并在回退时清空 completed_at，待产品角色确认；若禁止则删除回退语义，字段结构不变"
+  ]
+}

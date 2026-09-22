@@ -4,7 +4,6 @@ Callers must hold the project's exclusive lock for every mutating operation,
 including preview_restore. Stop editors and agents before restoring files.
 """
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,13 @@ import shutil
 import stat
 import tempfile
 from datetime import datetime, timezone
+
+import kernel_bootstrap  # noqa: F401 — P2-05 单处引导：优先本目录 _kernel_vendor，回退仓库 packages/
+
+
+from agents_kernel.atomicio import fsync_directory, read_json, write_atomic
+from agents_kernel.digest import canonical_bytes, sha256_bytes
+from agents_kernel.paths import SENSITIVE_NAMES, SENSITIVE_PREFIXES, SENSITIVE_SUFFIXES, absolute, realpath
 
 
 MAX_FILES = 1000
@@ -31,20 +37,29 @@ class ArchiveError(ValueError):
         self.safety_archive_id = safety_archive_id
 
 
-def _encode(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+def pending_restore(project_root):
+    """供 core/CLI 探测未完成恢复的公共 API（外部不得硬编码存档内部布局常量）。
 
-
-def _digest(data):
-    return hashlib.sha256(data).hexdigest()
+    返回 None 或 {"safety_archive_id": ...}。路径异常抛 ArchiveError（由调用方转译为
+    自身的错误类型）；元数据损坏时由共享 read_json 抛 CompanionError，与 core 侧
+    旧探测行为一致。
+    """
+    archive_root = realpath(project_root) / ".dev-companion" / "archives"
+    pending = archive_root / "restore-pending.json"
+    if archive_root.is_symlink() or pending.is_symlink():
+        raise ArchiveError("存档恢复记录路径异常，请先核查")
+    if not pending.exists():
+        return None
+    record = read_json(pending)
+    return {"safety_archive_id": record.get("safety_archive_id") if isinstance(record, dict) else None}
 
 
 class ArchiveStore:
     def __init__(self, project):
-        candidate = Path(project).absolute()
+        candidate = absolute(project)
         if candidate.is_symlink() or not candidate.is_dir():
             raise ArchiveError("项目必须是现有普通目录，不能是符号链接。")
-        self.project = candidate.resolve()
+        self.project = realpath(candidate)
         self.root = self.project / ".dev-companion" / "archives"
 
     def _internal_path(self, path):
@@ -88,20 +103,10 @@ class ArchiveStore:
     def _atomic_json(self, path, value):
         self._internal_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = _encode(value)
+        data = canonical_bytes(value)
         if len(data) > MAX_METADATA_BYTES:
             raise ArchiveError("存档元数据超过允许大小。")
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".pending-", delete=False) as out:
-                temporary = Path(out.name)
-                out.write(data)
-                out.flush()
-                os.fsync(out.fileno())
-            os.replace(temporary, path)
-        finally:
-            if temporary is not None and temporary.exists():
-                temporary.unlink()
+        write_atomic(path, data, prefix=".pending-")
 
     def _catalog(self):
         path = self._internal_path(self.root / "catalog.json")
@@ -149,11 +154,11 @@ class ArchiveStore:
             raise ArchiveError("禁止空路径段、. 或 ..：" + name)
         for part in parts:
             lower = part.lower()
-            if lower in {".git", ".dev-companion", ".ssh", ".aws", ".gnupg", ".kube", ".docker",
-                         ".npmrc", ".pypirc", ".netrc", ".git-credentials", ".dockercfg", "auth.json"}:
+            # 统一敏感清单（agents_kernel.paths）= 本模块旧清单 ∪ core 旧清单；
+            # core 独有条目均已被前缀规则覆盖，此处拒绝范围与旧实现完全一致。
+            if lower in SENSITIVE_NAMES:
                 raise ArchiveError("不能纳入内部目录或凭据目录：" + name)
-            if (lower.startswith((".env", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "secrets", "service-account"))
-                    or lower.endswith((".pem", ".key", ".p12", ".pfx", ".keystore", ".keychain"))):
+            if (lower.startswith(SENSITIVE_PREFIXES) or lower.endswith(SENSITIVE_SUFFIXES)):
                 raise ArchiveError("不能纳入可能包含凭据或私钥的路径：" + name)
         return name
 
@@ -210,7 +215,7 @@ class ArchiveStore:
             total += len(data)
             if len(data) > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
                 raise ArchiveError("单文件上限为 10 MiB，每次存档上限为 50 MiB。")
-            digest = _digest(data)
+            digest = sha256_bytes(data)
             entries[name] = {"sha256": digest, "size": len(data), "mode": stat.S_IMODE(before.st_mode) & 0o777}
             blobs[digest] = data
         return entries, blobs
@@ -221,7 +226,7 @@ class ArchiveStore:
             raise ArchiveError("找不到存档：" + str(archive_id))
         directory = self.root / archive_id
         data = self._read_bytes(directory / "manifest.json", MAX_METADATA_BYTES)
-        if _digest(data) != record["manifest_sha256"]:
+        if sha256_bytes(data) != record["manifest_sha256"]:
             raise ArchiveError("存档清单校验失败，拒绝恢复。")
         try:
             manifest = json.loads(data)
@@ -244,7 +249,7 @@ class ArchiveStore:
             digest = entry["sha256"]
             blob = self._read_bytes(directory / "files" / digest, MAX_FILE_BYTES)
             total += len(blob)
-            if len(blob) != entry["size"] or _digest(blob) != digest or total > MAX_TOTAL_BYTES:
+            if len(blob) != entry["size"] or sha256_bytes(blob) != digest or total > MAX_TOTAL_BYTES:
                 raise ArchiveError("存档内容校验失败或超过大小上限：" + name)
             blobs[digest] = blob
         return record, entries, blobs
@@ -266,7 +271,7 @@ class ArchiveStore:
                     out.write(data)
                     out.flush()
                     os.fsync(out.fileno())
-            manifest_data = _encode(manifest)
+            manifest_data = canonical_bytes(manifest)
             with (temporary / "manifest.json").open("wb") as out:
                 out.write(manifest_data)
                 out.flush()
@@ -274,7 +279,7 @@ class ArchiveStore:
             os.replace(temporary, destination)
             record = {"archive_id": archive_id, "created_at": created_at, "summary": summary,
                       "kind": kind, "file_count": sum(entry is not None for entry in entries.values()),
-                      "scope_count": len(entries), "manifest_sha256": _digest(manifest_data)}
+                      "scope_count": len(entries), "manifest_sha256": sha256_bytes(manifest_data)}
             updated = {"version": 1, "managed_paths": sorted(paths), "archives": catalog["archives"] + [record]}
             self._load_archive(archive_id, updated)
             self._atomic_json(self.root / "catalog.json", updated)
@@ -313,8 +318,8 @@ class ArchiveStore:
         paths = sorted(catalog["managed_paths"])
         current, _ = self._capture(paths)
         desired = {name: entries.get(name) for name in paths}
-        fingerprint = _digest(_encode({"archive_id": archive_id, "manifest_sha256": record["manifest_sha256"],
-                                      "scope": paths, "current": current}))
+        fingerprint = sha256_bytes(canonical_bytes({"archive_id": archive_id, "manifest_sha256": record["manifest_sha256"],
+                                                    "scope": paths, "current": current}))
         return catalog, current, desired, blobs, fingerprint
 
     def preview_restore(self, archive_id):
@@ -327,7 +332,7 @@ class ArchiveStore:
                 changes.append({"path": name, "action": action})
         token = secrets.token_urlsafe(32)
         self._atomic_json(self.root / "restore-preview.json", {"archive_id": archive_id,
-                          "token_sha256": _digest(token.encode()), "fingerprint": fingerprint})
+                          "token_sha256": sha256_bytes(token.encode()), "fingerprint": fingerprint})
         return {"archive_id": archive_id, "token": token, "changes": changes,
                 "managed_paths": catalog["managed_paths"], "notice": BACKUP_NOTICE,
                 "warning": "请暂停其他智能体和编辑器写入。旧存档中没有、但之后显式纳管的文件会被删除；恢复前会保存当前完整纳管范围。"}
@@ -337,11 +342,14 @@ class ArchiveStore:
         if entry is None:
             if path.exists():
                 path.unlink()
+                # Z23尾/FS07：删除同样是目录项变更，尽力 fsync 父目录使恢复持久。
+                fsync_directory(path.parent)
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         self._project_path(name)
         temporary = None
         try:
+            # 保留原实现而非并入 kernel 原子写：需要在 replace 前 fchmod 还原文件模式。
             with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".companion-restore-", delete=False) as out:
                 temporary = Path(out.name)
                 out.write(blobs[entry["sha256"]])
@@ -350,6 +358,9 @@ class ArchiveStore:
                 os.fchmod(out.fileno(), entry["mode"])
             self._project_path(name)
             os.replace(temporary, path)
+            # Z23尾/FS07：与 kernel write_atomic 同口径，replace 后尽力 fsync 父目录；
+            # Windows 等不支持目录 fsync 的平台由 fsync_directory 静默跳过。
+            fsync_directory(path.parent)
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()
@@ -361,7 +372,7 @@ class ArchiveStore:
             raise ArchiveError("请先预览恢复范围，再使用该次预览 token。")
         preview = self._read_json(preview_path)
         if (not isinstance(preview, dict) or preview.get("archive_id") != archive_id or not isinstance(token, str)
-                or not secrets.compare_digest(str(preview.get("token_sha256", "")), _digest(token.encode()))):
+                or not secrets.compare_digest(str(preview.get("token_sha256", "")), sha256_bytes(token.encode()))):
             raise ArchiveError("恢复 token 无效或与目标不匹配，请重新预览。")
         catalog, current, desired, blobs, fingerprint = self._restore_context(archive_id)
         if preview.get("fingerprint") != fingerprint:
@@ -401,3 +412,14 @@ class ArchiveStore:
             raise ArchiveError("恢复未完成：" + str(exc) + "。保护存档：" + safety_id, safety_id) from exc
         return {"archive_id": archive_id, "safety_archive_id": safety_id, "status": "restored",
                 "changed_paths": pending["applied_paths"], "notice": BACKUP_NOTICE}
+
+
+def export_compat(project_dir, out_dir):
+    """把已导入 SQLite 事实库的项目导出为旧版兼容 JSON 草稿（P2-04，CLI 不可见纯函数）。
+
+    只读旁路：委托 agents_kernel.storage.migration.fallback_export，导出目录由调用方
+    指定，绝不覆盖项目 .dev-companion 下的原 state/journey/release.json；与存档/恢复
+    逻辑（ArchiveStore）完全无关，不读取也不写入 archives/。
+    """
+    from agents_kernel.storage import migration
+    return migration.fallback_export(project_dir, out_dir)

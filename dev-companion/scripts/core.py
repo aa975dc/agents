@@ -1,187 +1,60 @@
-"""Project facts and verification for Dev Companion (Python 3.9+, stdlib only)."""
+"""Project facts and verification for Dev Companion (Python 3.9+, stdlib only).
+
+P2-01 起共享工具下沉 packages/agents_kernel，本模块保留原公共名作兼容 Facade
+（re-export 或薄委托），并继续负责锁、状态机、快照、聚合与渲染。依赖方向：
+core → kernel；core → archives（restore-pending 探测走其公共 API）；
+core 可懒加载 journey/releases 做聚合——journey/releases 对 core 已无模块级依赖，环已解除。
+"""
 import contextlib
-import datetime
-import hashlib
 import html
-import json
 import os
-from pathlib import Path, PurePosixPath
-import re
-import signal
 import stat
-import subprocess
-import tempfile
+import subprocess  # noqa: F401 — re-export：tests 以 "core.subprocess.Popen" 为 patch 目标（模块单例）
 import uuid
+from pathlib import Path
+
+import kernel_bootstrap  # noqa: F401 — P2-05 单处引导：优先本目录 _kernel_vendor，回退仓库 packages/
+
+from agents_kernel.atomicio import read_json, write_json
+from agents_kernel.digest import content_digest, digest, sha256_file
+from agents_kernel.domain.tasks import check_transition
+from agents_kernel.paths import EXCLUDED_DIRS, realpath, sensitive
+from agents_kernel.process import now, redact_output, run_argv
+from agents_kernel.services.request_cache import RequestCache
+from agents_kernel.validation import (CompanionError, relative_path, safe_file, strings, text,
+                                      validate_scope)
+
+from archives import ArchiveError, pending_restore
 
 
-class CompanionError(ValueError):
-    pass
+CAPACITY_LIMIT_MESSAGE = "项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）"
 
 
-def now():
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+class CapacityExceeded(CompanionError):
+    """项目超出当前扫描容量上限（Z21 前半）：状态可降级展示，写路径仍硬拒绝。"""
 
 
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-
-
-def read_json(path):
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise CompanionError("无法读取有效的 JSON：%s" % path) from exc
-
-
-def text(value, label):
-    if not isinstance(value, str) or not value.strip():
-        raise CompanionError(label + "不能为空")
-    return value.strip()
-
-
-def strings(value, label, nonempty=False):
-    if not isinstance(value, list) or (nonempty and not value):
-        raise CompanionError(label + "必须是%s列表" % ("非空" if nonempty else ""))
-    return [text(item, label) for item in value]
-
-
-OUTPUT_LIMIT = 65536
-SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
-    re.compile(r"(?i)\b(?:[A-Za-z0-9_.-]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key)[A-Za-z0-9_.-]*)"
-               r"(?:\s*[:=]\s*|_)[A-Za-z0-9._~+/=-]{4,}"),
-    re.compile(r"\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b"),
-    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
-)
-
-
-def redact_output(value):
-    raw = value if isinstance(value, bytes) else str(value).encode("utf-8", errors="replace")
-    decoded = raw[:OUTPUT_LIMIT].decode("utf-8", errors="replace")
-    cleaned = decoded
-    for pattern in SECRET_PATTERNS:
-        cleaned = pattern.sub("[REDACTED]", cleaned)
-    return {"output": cleaned, "output_sha256": hashlib.sha256(raw).hexdigest(),
-            "output_redacted": cleaned != decoded, "truncated": len(raw) > OUTPUT_LIMIT}
-
-
-def run_argv(argv, cwd, timeout, timeout_message):
-    result = {"argv": argv, "started_at": now(), "executed": False, "exit_code": None,
-              "timed_out": False, "termination_confirmed": True}
-    error = ""
-    with tempfile.TemporaryFile() as output:
-        process = None
-        try:
-            process = subprocess.Popen(argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
-                                       stdout=output, stderr=subprocess.STDOUT, shell=False,
-                                       start_new_session=(os.name == "posix"))
-            result["executed"] = True
-            result["exit_code"] = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            result.update(timed_out=True, termination_confirmed=False)
-            error = timeout_message
-            if process is not None:
-                try:
-                    if os.name == "posix":
-                        os.killpg(process.pid, signal.SIGTERM)
-                    else:
-                        process.terminate()
-                    process.wait(timeout=1)
-                except (ProcessLookupError, subprocess.TimeoutExpired):
-                    pass
-                finally:
-                    try:
-                        if os.name == "posix":
-                            os.killpg(process.pid, signal.SIGKILL)
-                        elif process.poll() is None:
-                            process.kill()
-                    except ProcessLookupError:
-                        pass
-                    try:
-                        process.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        pass
-        except (OSError, ValueError) as exc:
-            error = str(exc)
-        output.seek(0)
-        body = output.read(OUTPUT_LIMIT + 1)
-    combined = (error + "\n").encode() + body if error else body
-    result.update(finished_at=now(), **redact_output(combined))
-    return result
-
-
-EXCLUDED_DIRS = {".git", ".dev-companion", "node_modules", ".venv", "venv", "__pycache__",
-                 ".pytest_cache", ".mypy_cache", "dist", "build", ".next"}
-
-
-def sensitive(name):
-    name = name.lower()
-    return (name == ".env" or name.startswith(".env.") or
-            name in {"id_rsa", "id_ed25519", "credentials.json", ".npmrc", ".pypirc"} or
-            name.endswith((".pem", ".key", ".p12", ".pfx")))
-
-
-def relative_path(value):
-    value = text(value, "文件路径")
-    path = PurePosixPath(value)
-    if (path.is_absolute() or "\\" in value or ":" in value or
-            any(p in {"", ".", ".."} for p in value.split("/")) or
-            any(p in EXCLUDED_DIRS for p in path.parts) or any(sensitive(p) for p in path.parts)):
-        raise CompanionError("文件路径不在支持的普通项目文件范围：" + value)
-    return value
-
-
-def safe_file(project, name, exists=False):
-    name = relative_path(name)
-    path = project
-    for part in PurePosixPath(name).parts:
-        path = path / part
-        if path.is_symlink():
-            raise CompanionError("文件链接不在支持范围：" + name)
-    if path.exists() and not path.is_file():
-        raise CompanionError("需要普通文件：" + name)
-    if exists and not path.is_file():
-        raise CompanionError("找不到产物文件：" + name)
-    return path
-
-
-def validate_scope(raw):
-    if not isinstance(raw, dict):
-        raise CompanionError("需求必须是 JSON 对象")
-    scope = {key: text(raw.get(key), key) for key in ("title", "goal", "audience", "scenario")}
-    for key in ("out_of_scope", "assumptions"):
-        scope[key] = strings(raw.get(key, []), key)
-    features = raw.get("features")
-    if not isinstance(features, list) or not features:
-        raise CompanionError("首版至少需要一项功能")
-    scope["features"] = []
-    seen = set()
-    for item in features:
-        if not isinstance(item, dict):
-            raise CompanionError("功能必须是对象")
-        identifier = text(item.get("id"), "功能编号")
-        if not all(c.isascii() and (c.isalnum() or c in "-_") for c in identifier) or identifier in seen:
-            raise CompanionError("功能编号须唯一且仅含英文字母、数字、下划线或短横线")
-        seen.add(identifier)
-        paths = strings(item.get("allowed_paths"), "可修改文件", True)
-        paths = list(dict.fromkeys(relative_path(p) for p in paths))
-        commands = item.get("check_commands", [])
-        if not isinstance(commands, list):
-            raise CompanionError("检查命令必须为参数数组的列表")
-        commands = [strings(c, "检查命令参数", True) for c in commands]
-        needs_user = item.get("requires_user_acceptance", True)
-        if type(needs_user) is not bool:
-            raise CompanionError("requires_user_acceptance 必须为布尔值")
-        scope["features"].append({"id": identifier, "title": text(item.get("title"), "功能名称"),
-                                  "acceptance_criteria": strings(item.get("acceptance_criteria"), "验收条件", True),
-                                  "allowed_paths": paths, "check_commands": commands,
-                                  "requires_user_acceptance": needs_user})
-    return scope
+# Z24：legacy 五状态转换白名单，校验器与内核 domain.tasks 同一个（check_transition）。
+# → blocked 只能经 block()/feedback() 统一入口进入（显式原因 + 资格失效，与内核
+# "blocked/cancelled 拒绝普通 transition" 同一规则）；其余转换由各入口既有前置把守
+# （packet 要求 confirmed/idle/plan，receipt 要求 running 且 run_id/范围版本/规划指纹
+# 匹配，check 要求 awaiting_review/accepted，accept 要求当前内容的有效检查）。
+# 与内核 Task 状态机的对应与差异：blocked 可再 block（与内核 _BLOCKABLE_FROM 含
+# blocked 一致）；legacy 的 accepted 不是终态（验收后可经 check/packet 打回返工），
+# 内核 Feature 的 accepted 是终态——差异保留，属既有兼容语义。revise() 按范围整体
+# 重置任务为 pending，属范围操作，不经此单任务转换表。
+LEGACY_TRANSITIONS = {
+    "pending": frozenset({"running", "blocked"}),
+    "running": frozenset({"awaiting_review", "blocked"}),
+    "awaiting_review": frozenset({"accepted", "running", "awaiting_review", "blocked"}),
+    "accepted": frozenset({"awaiting_review", "running", "blocked"}),
+    "blocked": frozenset({"running", "blocked"}),
+}
 
 
 class Project:
     def __init__(self, path):
-        self.root = Path(path).resolve()
+        self.root = realpath(path)
         if not self.root.is_dir():
             raise CompanionError("项目目录不存在")
         self.data = self.root / ".dev-companion"
@@ -190,20 +63,30 @@ class Project:
         self.state_path = self.data / "state.json"
 
     def recovery_status(self):
-        directory = self.data / "archives"
-        pending = directory / "restore-pending.json"
-        if directory.is_symlink() or pending.is_symlink():
-            raise CompanionError("存档恢复记录路径异常，请先核查")
-        if not pending.exists():
+        # 探测走 archives 公共 API；内部布局（archives/restore-pending.json）属主是 archives.py。
+        try:
+            info = pending_restore(self.root)
+        except ArchiveError as exc:
+            raise CompanionError(str(exc)) from exc
+        if info is None:
             return None
-        record = read_json(pending)
-        return {"required": True, "safety_archive_id": record.get("safety_archive_id") if isinstance(record, dict) else None,
+        return {"required": True, "safety_archive_id": info["safety_archive_id"],
                 "message": "上次恢复未完成；请先核对保护存档和 restore-pending.json，暂停制作与验收"}
+
+    def orphan_release_note(self):
+        if (not self.state_path.exists() and not self.state_path.is_symlink()
+                and (self.data / "release.json").is_file()):
+            return ("项目状态 state.json 缺失，但发布记录 release.json 仍保留；不会自动重建状态，也不会把旧发布当作当前已验收。"
+                    "请先从备份恢复 state.json；若确认放弃该发布历史，请人工移走 release.json 后再重新 init")
+        return None
 
     def load(self):
         if self.state_path.is_symlink():
             raise CompanionError("项目记录不能是文件链接")
         if not self.state_path.exists():
+            orphan = self.orphan_release_note()
+            if orphan:
+                raise CompanionError(orphan)
             raise CompanionError("尚未建立需求记录，请先整理需求并运行 init")
         state = read_json(self.state_path)
         if (not isinstance(state, dict) or state.get("schema_version") != 1 or
@@ -289,27 +172,56 @@ class Project:
         state["revision"] += 1
         state["updated_at"] = now()
         state["events"].append({"revision": state["revision"], "at": state["updated_at"], **event})
-        fd, temporary = tempfile.mkstemp(prefix="state-", suffix=".tmp", dir=str(self.data))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.state_path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        write_json(self.state_path, state, prefix="state-", suffix=".tmp")
 
     def snapshot(self):
-        files, excluded, total = {}, [], 0
+        # Z13：请求作用域内同项目只扫一次；作用域外（packet/check/accept 等写路径）每次现算，
+        # check 的前后快照对比不受缓存影响。
+        return RequestCache.get(("project-snapshot", str(self.root)), self._snapshot_guarded)
+
+    def _capacity_verdict_path(self):
+        return self.data / "capacity-verdict.json"
+
+    def _snapshot_guarded(self):
+        """ST06/SC05（收尾 R05）：普通查询不读源码内容、不 walk 源码树——容量判定在
+        confirm 时已普查并缓存（stat-only，零文件读取）；无判定的旧项目在此做一次
+        stat-only 普查（零内容读取）补齐。删除 capacity-verdict.json 可强制重测
+        （fail-safe：缓存只会拒绝、不会把超限项目放行为可验收）。"""
+        verdict = self._ensure_capacity_verdict()
+        if verdict.get("oversize"):
+            raise CapacityExceeded(CAPACITY_LIMIT_MESSAGE)
+        return self._scan_snapshot()
+
+    def _ensure_capacity_verdict(self):
+        verdict_path = self._capacity_verdict_path()
+        verdict = read_json(verdict_path) if verdict_path.is_file() else None
+        if verdict is not None:
+            return verdict
+        count = total = 0
+        oversize = False
+        for entry in self._walk_included():
+            if entry[0] != "file":
+                continue
+            count += 1
+            total += entry[3].st_size
+            if entry[3].st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or count >= 10000:
+                oversize = True
+                break
+        verdict = {"schema_version": 1, "oversize": oversize, "files": count,
+                   "bytes": total, "measured_at": now()}
+        write_json(verdict_path, verdict)
+        return verdict
+
+    def _walk_included(self):
+        """产出 ("excluded", 原因) 或 ("file", relative, path, stat_result)。
+        过滤条件是容量普查与快照哈希的唯一来源（防两处走样）。"""
         for directory, dirs, names in os.walk(self.root, followlinks=False):
             parent = Path(directory)
             kept = []
             for name in sorted(dirs):
                 path = parent / name
                 if name in EXCLUDED_DIRS or sensitive(name) or path.is_symlink():
-                    excluded.append(path.relative_to(self.root).as_posix() + "/")
+                    yield "excluded", path.relative_to(self.root).as_posix() + "/"
                 else:
                     kept.append(name)
             dirs[:] = kept
@@ -317,24 +229,40 @@ class Project:
                 path = parent / name
                 relative = path.relative_to(self.root).as_posix()
                 if name == ".DS_Store" or name.endswith(".pyc") or sensitive(name) or path.is_symlink():
-                    excluded.append(relative)
+                    yield "excluded", relative
                     continue
                 if not path.is_file():
-                    raise CompanionError("不支持特殊文件：" + relative)
-                info = path.stat()
-                total += info.st_size
-                if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
-                    raise CompanionError("项目超出首版检查范围（单文件20MiB，总量100MiB，10000文件）")
-                content = path.read_bytes()
-                after = path.stat()
-                if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or len(content) != info.st_size:
-                    raise CompanionError("项目文件正在变化，请等待写入结束后刷新")
-                files[relative] = digest({"sha256": hashlib.sha256(content).hexdigest(), "mode": stat.S_IMODE(info.st_mode)})
+                    yield "excluded", relative + "（特殊文件，未纳入项目检查）"
+                    continue
+                yield "file", relative, path, path.stat()
+
+    def _scan_snapshot(self):
+        files, excluded, total = {}, [], 0
+        for entry in self._walk_included():
+            if entry[0] == "excluded":
+                excluded.append(entry[1])
+                continue
+            _, relative, path, info = entry
+            total += info.st_size
+            if info.st_size > 20 * 1024 * 1024 or total > 100 * 1024 * 1024 or len(files) >= 10000:
+                # 项目在"未超限判定"之后长到超限：回写判定，让下一次 status 零读取降级
+                write_json(self._capacity_verdict_path(),
+                           {"schema_version": 1, "oversize": True, "files": len(files) + 1,
+                            "bytes": total, "measured_at": now()})
+                raise CapacityExceeded(CAPACITY_LIMIT_MESSAGE)
+            sha256_hex, size = sha256_file(path)
+            after = path.stat()
+            if (after.st_mtime_ns, after.st_ctime_ns, after.st_mode) != (info.st_mtime_ns, info.st_ctime_ns, info.st_mode) or size != info.st_size:
+                raise CompanionError("项目文件正在变化，请等待写入结束后刷新")
+            files[relative] = content_digest(sha256_hex, stat.S_IMODE(info.st_mode))
         return {"files": files, "fingerprint": digest(files), "excluded": sorted(excluded)}
 
     def init(self, scope):
         scope = validate_scope(scope)
         with self.locked():
+            orphan = self.orphan_release_note()
+            if orphan:
+                raise CompanionError(orphan)
             if self.state_path.exists() or self.state_path.is_symlink():
                 raise CompanionError("已有项目记录；修改范围请使用 scope，避免覆盖历史")
             state = {"schema_version": 1, "project": str(self.root), "revision": 0,
@@ -351,6 +279,12 @@ class Project:
             self.require_plan(state)
             state["confirmed"] = True
             self.commit(state, {"kind": "scope_confirmed", "scope_version": state["scope_version"]})
+            # 收尾 R05：项目确认即做一次 stat-only 容量普查并缓存，保证此后普通 status
+            # 对源码树零 walk、零内容读取（超限则 status 直接走判定降级）。
+            try:
+                self._ensure_capacity_verdict()
+            except CompanionError:
+                pass
             return {"revision": state["revision"], "scope_version": state["scope_version"], "confirmed": True}
 
     @staticmethod
@@ -561,15 +495,18 @@ class Project:
         note = text(note, "反馈说明")
         with self.locked():
             state = self.load()
+            # Z24：feedback 是返工语义——前提是项目已无在途执行（require_idle），
+            # 否则一边记录"成果要重做"一边还有人正在写入。block 无此前置，差异
+            # 是语义不是不对称，理由见 block() 内注释。
             self.require_idle(state)
             feature, task = self.feature(state, identifier)
+            check_transition(LEGACY_TRANSITIONS, task["status"], "blocked", "任务")
             feedback = {"kind": kind, "note": note, "at": now(), "scope_version": state["scope_version"]}
             if kind == "requirement":
                 feedback["requirement_basis"] = self.requirement_basis(state["scope"], feature)
             task.setdefault("feedback", []).append(feedback)
             task.update(status="blocked", blocker=note)
-            for key in ("acceptance", "verification", "integration"):
-                task.pop(key, None)
+            self._invalidate_eligibility(task)
             self.commit(state, {"kind": "feedback_recorded", "feature_id": identifier, "feedback": feedback})
             return {"revision": state["revision"], "status": "blocked", "feedback": feedback}
 
@@ -578,14 +515,38 @@ class Project:
         with self.locked():
             state = self.load()
             _, task = self.feature(state, identifier)
+            check_transition(LEGACY_TRANSITIONS, task["status"], "blocked", "任务")
+            # Z24：block 不要求 idle（与 feedback 的前置差异是语义不是不对称）——
+            # 阻断是"现在就把受阻事实记下来"，允许对仍在写入的执行做标记。实际
+            # 停止与状态标记分开：本命令不终止任何外部进程，也不假装进程已停；
+            # 执行是否真正停止由人按返回消息核对，后续指纹核验兜底。
             task.update(status="blocked", blocker=reason)
-            task.pop("acceptance", None)
+            self._invalidate_eligibility(task)
             self.commit(state, {"kind": "blocked", "feature_id": identifier, "reason": reason})
             return {"revision": state["revision"], "status": "blocked",
                     "message": "已记录阻塞；此命令不会替你终止外部智能体，请确认实际写入已停止"}
 
+    @staticmethod
+    def _invalidate_eligibility(task):
+        """Z24 统一资格失效（block/feedback 共用，消除两者证据清理的不对称）：
+        清当前验收，并使检查/联调证据引用一并失效。失效的是"当前资格"，不是
+        历史——state.events 只追加（checked/accepted 事件原样保留），journey
+        历史不删；被清的 verification/integration 在重新 check 前不能用于验收
+        或发布。"""
+        for key in ("acceptance", "verification", "integration"):
+            task.pop(key, None)
+
     def status(self, include_release=True, snapshot=None):
+        # Z13：本命令是只读的，作用域内 Journey 三次解析/产物重哈希与快照复用为一次；
+        # 写命令不经此路径（作用域外一切照旧，行为等价）。跨进程缓存明确不做。
+        with RequestCache.with_scope():
+            return self._status(include_release, snapshot)
+
+    def _status(self, include_release, snapshot):
         from journey import Journey
+        orphan = self.orphan_release_note()
+        if orphan:
+            raise CompanionError(orphan)
         planning = Journey(self).status()
         if not self.state_path.exists() and not self.state_path.is_symlink() and planning:
             view = {"schema_version": 1, "title": "产品规划", "goal": "先明确产品，再形成可执行范围",
@@ -597,7 +558,11 @@ class Project:
             return self.decorate_status(view, planning, include_release)
         state = self.load()
         recovery = self.recovery_status()
-        snapshot = snapshot or self.snapshot()
+        try:
+            snapshot = snapshot or self.snapshot()
+        except CapacityExceeded as exc:
+            # Z21 前半：快照超限时状态不再整体抛错，改走"索引未建"降级视图。
+            return self._status_capacity_paused(state, planning, exc)
         planning_fingerprint = self.planning_fingerprint()
         features, counts = [], {s: 0 for s in ("pending", "running", "awaiting_review", "accepted", "blocked")}
         for feature in state["scope"]["features"]:
@@ -640,6 +605,40 @@ class Project:
                 "recovery": recovery,
                 "publication": "未核验发布状态", "history": state["events"][-10:]}
         return self.decorate_status(view, planning, include_release)
+
+    def _status_capacity_paused(self, state, planning, exc):
+        # Z21 前半：超限项目的降级视图——项目名/任务状态来自本地台账（不扫源码树），
+        # 指纹相关字段显式 unavailable，绝不冒充最新；沿用现有 stale 语义：
+        # 无法核验的已验收不算仍通过（unknown/stale 不变 accepted）。
+        # 07_STORAGE §5：只读展示降级不代表安全门降级——验收/发布核验一并关闭。
+        counts = {s: 0 for s in ("pending", "running", "awaiting_review", "accepted", "blocked")}
+        features = []
+        for feature in state["scope"]["features"]:
+            task = state["tasks"][feature["id"]]
+            status = "awaiting_review" if task["status"] == "accepted" else task["status"]
+            counts[status] += 1
+            features.append({**feature, "status": status, "evidence_stale": "verification" in task,
+                             "blocker": task.get("blocker") or task.get("receipt", {}).get("blocker"),
+                             "verification": task.get("verification"), "integration": task.get("integration"),
+                             "integration_stale": not task.get("integration", {}).get("passed"),
+                             "feedback": task.get("feedback", []), "acceptance": task.get("acceptance")})
+        total = len(features)
+        view = {"schema_version": 1, "title": state["scope"]["title"], "goal": state["scope"]["goal"],
+                "scope": state["scope"], "revision": state["revision"], "scope_version": state["scope_version"],
+                "confirmed": state["confirmed"], "updated_at": state["updated_at"], "observed_at": now(),
+                "counts": counts, "total": total, "overall_percent": None,
+                "next_step": "", "features": features, "excluded_paths": [],
+                "source_fingerprint": None, "fingerprint_status": "unavailable",
+                "capacity_status": "paused", "capacity_message": str(exc),
+                "recovery": self.recovery_status(),
+                "publication": "项目超出当前检查上限；发布核验暂停，建立索引后才能核验",
+                "release": None, "history": state["events"][-10:]}
+        view = self.decorate_status(view, planning, include_release=False)
+        if not view.get("recovery"):
+            view["next_step"] = ("项目文件超出当前检查上限（单文件20MiB，总量100MiB，10000文件）；"
+                                 "进度与验收核验已暂停，请先为项目建立文件索引或减小规模后重试；"
+                                 "若项目已缩小，删除 .dev-companion/capacity-verdict.json 可重新测量")
+        return view
 
     def decorate_status(self, view, planning, include_release):
         release = None
@@ -688,13 +687,19 @@ RELEASE_LABELS["interrupted"] = "已记录中断现场；发布结果仍未核�
 def render_markdown(view):
     def cell(value):
         return str(value).replace("|", "\\|").replace("\n", " ")
-    progress = ("恢复未完成，暂不能计算" if view.get("recovery") else "范围待确认，暂不能计算") if view["overall_percent"] is None else "%s/%s 项已验收（%s%%）" % (
-        view["counts"]["accepted"], view["total"], view["overall_percent"])
+    unavailable = view.get("fingerprint_status") == "unavailable"
+    if view["overall_percent"] is not None:
+        progress = "%s/%s 项已验收（%s%%）" % (view["counts"]["accepted"], view["total"], view["overall_percent"])
+    else:
+        progress = ("恢复未完成，暂不能计算" if view.get("recovery")
+                    else "索引未建，暂不能核验" if unavailable else "范围待确认，暂不能计算")
     lines = ["# " + cell(view["title"]), "", cell(view["goal"]), "", "**本版完成度：** " + progress,
              "**当前阶段：** " + view.get("stage_label", "编码实现"),
              "**推荐下一步：** " + view["next_step"], "", "| 功能 | 状态 | 提醒 |", "|---|---|---|"]
     for feature in view["features"]:
-        notice = feature.get("blocker") or ("内容已变化，需要复查" if feature["evidence_stale"] else "")
+        notice = feature.get("blocker") or ""
+        if not notice and feature["evidence_stale"]:
+            notice = "无法核验当前内容（索引未建），需要复查" if unavailable else "内容已变化，需要复查"
         lines.append("| %s | %s | %s |" % (cell(feature["title"]), LABELS[feature["status"]], cell(notice)))
     lines += ["", "**首版不包含：** " + ("；".join(map(cell, view["scope"]["out_of_scope"])) or "尚未列出"),
               "**假设与待确认：** " + ("；".join(map(cell, view["scope"]["assumptions"])) or "当前未列出"),
@@ -708,12 +713,18 @@ def render_markdown(view):
 
 def render_html(view):
     esc = lambda value: html.escape(str(value), quote=True)
-    progress = ("恢复未完成" if view.get("recovery") else "范围待确认") if view["overall_percent"] is None else "%s / %s 项已验收" % (view["counts"]["accepted"], view["total"])
+    unavailable = view.get("fingerprint_status") == "unavailable"
+    if view["overall_percent"] is not None:
+        progress = "%s / %s 项已验收" % (view["counts"]["accepted"], view["total"])
+    else:
+        progress = "恢复未完成" if view.get("recovery") else ("索引未建，暂不能核验" if unavailable else "范围待确认")
     cards = []
     for f in view["features"]:
-        notes = f.get("blocker") or ("内容已变化，需要复查" if f["evidence_stale"] else "")
+        notice = f.get("blocker") or ""
+        if not notice and f["evidence_stale"]:
+            notice = "无法核验当前内容（索引未建），需要复查" if unavailable else "内容已变化，需要复查"
         cards.append('<article><span class="badge %s">%s</span><h3>%s</h3><p>%s</p><details><summary>怎样算完成</summary><ul>%s</ul></details></article>' % (
-            f["status"], LABELS[f["status"]], esc(f["title"]), esc(notes),
+            f["status"], LABELS[f["status"]], esc(f["title"]), esc(notice),
             "".join("<li>%s</li>" % esc(c) for c in f["acceptance_criteria"])))
     return '''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s · 开发陪伴</title><style>
@@ -721,10 +732,10 @@ def render_html(view):
 @media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#161a21;--text:#e8eaed;--muted:#abb6c7;--line:#3a4356;--blue:#85b7eb}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 system-ui,sans-serif}main{max-width:980px;margin:auto;padding:40px 24px}h1{font-size:32px;margin:12px 0}h2{font-size:24px}p{color:var(--muted)}.eyebrow{color:var(--blue);letter-spacing:.08em}.summary,article{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px}.summary{margin:24px 0;border-left:5px solid var(--blue)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.badge{display:inline-block;border:1px solid var(--line);padding:2px 10px;border-radius:20px;font-size:14px}.accepted{color:#3b7a28}.blocked{color:#b35428}summary{cursor:pointer;color:var(--blue)}footer{margin-top:28px;color:var(--muted);font-size:14px}ul{padding-left:24px}</style>
 <main><div class="eyebrow">DEV COMPANION / 开发陪伴</div><h1>%s</h1><p>%s</p>
-<section class="summary"><h2>%s</h2><p>当前阶段：%s</p><strong>下一步：%s</strong><p>这是本次读取的状态快照。重新运行进度命令可刷新；存档、验收与发布分别记录。</p></section>
+<section class="summary"><h2>%s</h2><p>生成时间：%s（board.html 是静态产物，以生成时的项目状态为准；重新运行进度命令可刷新）</p><p>当前阶段：%s</p><strong>下一步：%s</strong><p>这是本次读取的状态快照。重新运行进度命令可刷新；存档、验收与发布分别记录。</p></section>
 <div class="grid">%s</div><section><h2>本版范围</h2><p>暂不包含：%s</p><p>假设与待确认：%s</p></section>
 <footer>范围版本 %s · 记录更新 %s · 本次读取 %s<br>发布状态：%s</footer></main></html>''' % (
-        esc(view["title"]), esc(view["title"]), esc(view["goal"]), esc(progress), esc(view.get("stage_label", "编码实现")), esc(view["next_step"]),
+        esc(view["title"]), esc(view["title"]), esc(view["goal"]), esc(progress), esc(view["observed_at"]), esc(view.get("stage_label", "编码实现")), esc(view["next_step"]),
         "".join(cards), esc("；".join(view["scope"]["out_of_scope"]) or "尚未列出"),
         esc("；".join(view["scope"]["assumptions"]) or "当前未列出"), view["scope_version"],
         esc(view["updated_at"]), esc(view["observed_at"]), esc(view["publication"]))

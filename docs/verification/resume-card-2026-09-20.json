@@ -1,0 +1,21 @@
+{
+  "kind": "resume_card_pointer_superseded_by_closure",
+  "repo_id": "aa975dc/agents (local: /Users/youxididai/Documents/cj/agents, branch optimization-v1)",
+  "base_commit_or_manifest": "SUPERSEDED — authoritative progress is now docs/verification/closure-r01-mapping-2026-09-20.md (41-task + 68-spec closure) and docs/verification/final-acceptance-2026-09-20.md",
+  "active_store_reference": "docs/verification/closure-r01-mapping-2026-09-20.md",
+  "current_phase": "closure round (R01-R08) on self-consistent baseline 15df3f2",
+  "scope_version": "agents_optimization_v1_20260920 + agents_v1_closure_review_20260920",
+  "source_generation": null,
+  "completed_task_ids": ["NOTE", "the 15/40 and 40-task counts in this card were process-time snapshots with a WRONG denominator (original plan has 41 tasks); do not restore progress from this card"],
+  "active_attempts": [],
+  "blocked_tasks": ["P7-04/Z07 LICENSE (owner decision)", "PK06 install 0.3.0 (authorization)", "SC02-SC04 XL/XXL physical (resource authorization)"],
+  "next_ready_task_ids": [],
+  "approval_references": ["no push/no merge main/no tag/no publish/no install-upgrade (standing)"],
+  "host_capabilities_reference": "docs/host-contract/host-probe-2026-09-20.md",
+  "capacity_certifications": {
+    "L": "PASS scan/query/recovery subset (100k files, 238.5MiB, warm); status-on-large-project via CLI entry pending R05; cold-cache NOT_RUN",
+    "XL": "NOT_RUN (implementation + small-sample prep in R07; physical run needs authorization)",
+    "XXL": "NOT_RUN (same)"
+  },
+  "instruction": "从事实Store核对，不从本卡直接恢复accepted或猜测进度；本卡仅作历史指针。"
+}

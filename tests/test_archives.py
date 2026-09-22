@@ -3,12 +3,14 @@
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "dev-companion" / "scripts" / "archives.py"
+sys.path.insert(0, str(SOURCE.parent))  # P2-05：archives.py 以文件路径加载时，同目录 kernel_bootstrap 需可 import
 SPEC = importlib.util.spec_from_file_location("companion_archives", SOURCE)
 archives = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(archives)
