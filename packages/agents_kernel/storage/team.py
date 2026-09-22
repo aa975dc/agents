@@ -511,6 +511,145 @@ def integrate(project_dir, candidate_id, task_ids, check_argv, cwd=None, timeout
         store.close()
 
 
+def team_accept(project_dir, feature_id_value, note, user_confirmed, *, expect_seq=None):
+    """team 模式 accept 入口（Step-8 验收路由）：用户验收动作（五前置门，缺一拒绝并指名）。
+
+    复核 §4：team-only 项目的 accept 此前误入 legacy Project.accept（exit 2
+    "尚未建立需求记录"）——本入口补上团队链路的验收集成，复用既有集成/证据模型，
+    不直接改库、不创建 legacy state.json：
+    (a) 功能已在 team 事实库登记；
+    (b) 该功能全部 impl/review 任务 status=done 且最新 attempt 有 succeeded 回报；
+    (c) 存在已完成的集成版本（status=completed 且版本级回归通过）且其候选任务
+        覆盖该功能的全部 done 任务；
+    (d) 产物未漂移：集成 manifest regressed_on 的每个文件当前内容 sha256 仍等于
+        集成时采集值（漂移即拒绝并指出文件与新旧哈希——须重走
+        team-report → team-approve → team-integrate）；
+    (e) user_confirmed 为真且 note 非空——没有用户真实试用确认不产生验收
+        （缺省一律拒绝，不把"无确认"当默认同意）。
+    通过 → acceptance 证据事件（绑定集成候选/版本/manifest_sha256/regressed_on/
+    note/user_confirmed/accepted_at，evidence_view 可查）与 feature 状态 accepted
+    事件同一事务提交（折叠核验失败整体回滚）。
+    """
+    fid = text(feature_id_value, "功能编号")
+    note = text(note, "验收说明")
+    path = team_db_path(project_dir)
+    store = _open_existing(path)
+    try:
+        facts = _replay(store)
+        # (a) 功能存在
+        if fid not in facts.features:
+            raise CompanionError("功能 %s 未在 team 事实库登记；请先 team-init" % fid)
+        # (b) 该功能全部 impl/review 任务 done 且有 succeeded 回报
+        done_tids, missing = [], []
+        for tid in sorted(facts.tasks):
+            entry = facts.tasks[tid]
+            if entry["feature_id"] != fid or entry["kind"] not in ("impl", "review"):
+                continue
+            if entry["status"] != "done":
+                missing.append("任务 %s 状态 %s（须 done）" % (tid, entry["status"]))
+                continue
+            attempts = facts.board.attempts(tid)
+            report = facts.reports.get(attempt_id(tid, attempts[-1]["attempt_no"])) \
+                if attempts else None
+            if not attempts or attempts[-1]["outcome"] != "succeeded" or report is None:
+                missing.append("任务 %s 缺最新 attempt 的 succeeded 回报" % tid)
+            done_tids.append(tid)
+        if missing:
+            raise CompanionError("功能 %s 不能验收，任务门未过：%s" % (fid, "；".join(missing)))
+        # (c) 已完成的集成版本 + 候选任务覆盖全部 done 任务
+        completed = [m for m in facts.integration_versions
+                     if m["status"] == "completed" and m.get("version_level_passed") is True]
+        if not completed:
+            raise CompanionError(
+                "功能 %s 不能验收：没有已完成的集成版本"
+                "（team-integrate 版本级回归通过后才是 completed）" % fid)
+        vno = max(m["integration_version"] for m in completed)
+        manifest = facts.integration.version(vno)
+        sha = manifest["manifest_sha256"]
+        candidate_tids = {task["task_id"]: task["subject_sha256"]
+                          for candidate in manifest["candidates"] for task in candidate["tasks"]}
+        uncovered = sorted(set(done_tids) - set(candidate_tids))
+        if uncovered:
+            raise CompanionError(
+                "功能 %s 不能验收：已完成集成版本 %d 的候选任务未覆盖其全部 done 任务（缺 %s）"
+                % (fid, vno, "、".join(uncovered)))
+        # (d) 产物未漂移：regressed_on 每个文件当前 sha 仍等于集成回归时采集值
+        root = realpath(Path(project_dir))
+        regressed_on = (facts.version_bindings.get(vno) or {}).get("regressed_on") or {}
+        drifted = []
+        for tid in sorted(regressed_on):
+            for rel, recorded in sorted((regressed_on.get(tid) or {}).get("files", {}).items()):
+                try:
+                    current = digest.sha256_file(_workspace_file(root, rel))[0]
+                except CompanionError:
+                    current = None
+                if current != recorded:
+                    drifted.append("%s（任务 %s）：集成时 sha=%s，当前 %s"
+                                   % (rel, tid, recorded,
+                                      "sha=%s" % current if current else "不存在或不可核"))
+        if drifted:
+            raise CompanionError(
+                "功能 %s 验收被拒：集成版本 %d 的产物已漂移（批准与回归只对集成时固定版本有效，"
+                "须重走 team-report → team-approve → team-integrate）：%s"
+                % (fid, vno, "；".join(drifted)))
+        # (e) 用户真实确认（最后核验：复核 §4 指出旧路径在核验同意之前就进 legacy）
+        if user_confirmed is not True:
+            raise CompanionError("需要用户真实试用反馈后验收：必须显式 --user-confirmed，"
+                                 "不接受把缺省当作已确认")
+        accepted_at = db.utcnow()
+        cids = sorted(candidate["candidate_id"] for candidate in manifest["candidates"])
+        evidence_id = "feature-acceptance:" + fid
+        key = "team-accept:%s:%d:%s" % (fid, vno, uuid.uuid4().hex[:12])
+        feature = facts.features[fid]
+        specs = [
+            (views.EVENT_EVIDENCE_REGISTERED, evidence_id,
+             {"kind": "acceptance", "role": "feature_accepted", "subject_id": fid,
+              "result": "accepted", "source": "team-gate",
+              "detail": "功能 %s 用户验收：集成版本 %d（manifest=%s，候选 %s）：%s"
+                        % (fid, vno, sha, "、".join(cids), note),
+              "fact": {"feature_id": fid, "note": note, "user_confirmed": True,
+                       "accepted_at": accepted_at,
+                       "integration": {"integration_version": vno, "manifest_sha256": sha,
+                                       "candidates": cids,
+                                       "candidate_tasks": candidate_tids,
+                                       "regressed_on": regressed_on}}},
+             key),
+            (views.EVENT_FEATURE_STATUS, fid,
+             {"title": feature["title"], "status": "accepted",
+              "review_required": feature["review_required"],
+              "allowed_paths": feature["allowed_paths"]},
+             key + ":status"),
+        ]
+
+        def verify(conn):
+            row = conn.execute("SELECT result FROM evidence_view WHERE evidence_id = ?",
+                               (evidence_id,)).fetchone()
+            if row is None or row["result"] != "accepted":
+                raise CompanionError("验收证据未随同事务折叠（evidence_view 缺行）；整体回滚")
+            frow = conn.execute("SELECT status FROM feature_view WHERE feature_id = ?",
+                                (fid,)).fetchone()
+            if frow is None or frow["status"] != "accepted":
+                raise CompanionError("accepted 状态未随同事务折叠进功能视图；整体回滚")
+
+        writer = db.acquire_writer(store)
+        try:
+            results = _append_batch(store, writer.epoch, specs, expect_seq=expect_seq,
+                                    verify=verify)
+        finally:
+            writer.close()
+        return {"store": str(path), "feature_id": fid, "status": "accepted",
+                "note": note, "user_confirmed": True, "accepted_at": accepted_at,
+                "integration": {"integration_version": vno, "manifest_sha256": sha,
+                                "candidates": cids,
+                                "candidate_tasks": dict(sorted(candidate_tids.items())),
+                                "regressed_on": regressed_on},
+                "seq": results[-1]["seq"], "applied": all(r["applied"] for r in results),
+                "deduped": any(r["deduped"] for r in results),
+                "generation": events.view_head(store)}
+    finally:
+        store.close()
+
+
 def gate_check(project_dir, feature_id_value, kind="feature"):
     """team 模式 check 入口：只读门禁审计（SR-05：正常 check 入口接同一事实库）。
 
@@ -832,6 +971,9 @@ class _Facts:
         self.tasks = {}         # tid -> task dict（board.task 的最新副本）
         self.reports = {}       # "tid#no" -> report detail dict
         self.integration_versions = []  # [{integration_version, status, version_level_passed}]
+        # 验收绑定事实（team_accept 专用；_activity 视图形状不变）：vno →
+        # {"manifest_sha256", "candidates", "regressed_on"}——来自集成证据事件。
+        self.version_bindings = {}
         self.board = TaskBoard()
         self.review_board = ReviewBoard(self.board)
         self.board.review_guard = self.review_board.require_approval
@@ -943,16 +1085,28 @@ def _replay_evidence(facts, entity_id, payload):
         facts.integration_versions.append({"integration_version": detail.get("integration_version"),
                                            "status": "candidate",
                                            "version_level_passed": None})
+        facts.version_bindings[detail.get("integration_version")] = {
+            "manifest_sha256": detail.get("manifest_sha256"),
+            "candidates": list(detail.get("candidates", [])),
+            "regressed_on": None}
     elif role == "integration_version_level" and isinstance(detail, dict):
         for manifest in reversed(facts.integration_versions):
             if manifest["integration_version"] == detail.get("integration_version"):
                 manifest["version_level_passed"] = detail.get("exit_code") == 0
                 break
+        binding = facts.version_bindings.get(detail.get("integration_version"))
+        if binding is not None and binding["regressed_on"] is None:
+            binding["regressed_on"] = detail.get("regressed_on")
     elif role == "integration_completed":
         for manifest in reversed(facts.integration_versions):
             if manifest["integration_version"] == (detail or {}).get("integration_version"):
                 manifest["status"] = "completed"
                 break
+        binding = facts.version_bindings.get((detail or {}).get("integration_version"))
+        if binding is not None:
+            binding["manifest_sha256"] = detail.get("manifest_sha256")
+            if detail.get("regressed_on"):
+                binding["regressed_on"] = detail.get("regressed_on")
 
 
 def _require_open_attempt(facts, tid, action):

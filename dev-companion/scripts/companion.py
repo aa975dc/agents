@@ -253,6 +253,13 @@ def run(args):
     if name == "feedback":
         return project.feedback(args.feature, args.kind, args.note)
     if name == "accept":
+        if _team_mode(project):
+            # Step-8 验收路由：team-only 项目由正常验收入口走团队事实库的五前置门
+            #（任务 done + succeeded 回报、completed 集成覆盖、产物未漂移、真实确认），
+            # 产出 acceptance 证据与 feature accepted 事件；不再误入 legacy 的
+            # "尚未建立需求记录"。legacy 分支（无 team.db 或迁移并存项目）原样不动。
+            from agents_kernel.storage import team
+            return team.team_accept(args.project, args.feature, args.note, args.user_confirmed)
         return project.accept(args.feature, args.note, args.user_confirmed)
     if name == "block":
         return project.block(args.feature, args.reason)
